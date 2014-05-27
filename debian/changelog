@@ -1,0 +1,5 @@
+virtualjaguar (2.1.0-1) unstable; urgency=low
+
+  * Initial release (Closes: 749579).
+
+ -- John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>  Tue, 27 May 2014 19:00:51 +0200

@@ -1,0 +1,92 @@
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: virtualjaguar
+Source: http://icculus.org/virtualjaguar/
+
+Files: *
+Copyright: 2003-2013 James Hammons <jlhamm@acm.org>
+           2003 David Raingeard
+	   2003 Carwin Jones
+	   2003 Adam Green
+	   2003 Ryan C. Gordon <ryan@icculus.org>
+	   2003-2004 Neils Wagenaar <sdlemu@ngemu.com>
+License: GPL-3
+
+Files: src/m68000/*
+Copyright: 1995-2000 Bernd Schmidt <bernds@btinternet.com>
+	   1998-2012 Thomas Huth <huth@tuxfamily.org>
+	   2003-2013 James Hammons <jlhamm@acm.org>
+License: GPL-3
+
+Files: jagbios.cpp
+       jagcdbios.cpp
+       jagdevcdbios.cpp
+       jagstub1bios.cpp
+       jagstub2bios.cpp
+       universalhdr.cpp
+       wavetable.cpp
+Copyright: 1998-1999 Hasbro Interactive
+License: public-domain
+ Press Release by Hasbro Interactive
+ .
+ FOR IMMEDIATE RELEASE:
+ .
+ CONTACTS:
+ Dana Henry
+ Hasbro Interactive
+ 978-921-3759
+ dhenry@hasbro.com
+ .
+ Beverly, MA (May 14, 1999) - Leading entertainment software publisher, Hasbro
+ Interactive announced today it has released all rights that it may have to the
+ vintage Atari hardware platform, the Jaguar.
+ .
+ Hasbro Interactive acquired rights to many Atari properties, including the
+ legendary Centipede, Missile Command, and Pong games, in a March 1998
+ acquisition from JTS Corporation.
+ .
+ This announcement will allow software developers to create and publish software
+ for the Jaguar system without having to obtain a licensing agreement with
+ Hasbro Interactive for such platform development. Hasbro Interactive cautioned,
+ however, that the developers should not use the Atari trademark or logo in
+ connection with their games or present the games as authorized or approved by
+ Hasbro Interactive.
+ .
+ "Hasbro Interactive is strictly focused on developing and publishing
+ entertainment software for the PC and the next generation game consoles,"
+ said Richard Cleveland, Head of Marketing for Hasbro Interactive's Atari
+ Business Unit. "We realize there is a passionate audience of diehard Atari
+ fans who want to keep the Jaguar system alive, and we don't want to prevent
+ them from doing that. We will not interfere with the efforts of software
+ developers to create software for the Jaguar system."
+ .
+ Hasbro Interactive, Inc. is a leading all-family interactive games publisher,
+ formed in 1995 to bring to life on the computer the deep library of toy and
+ board games of parent company, Hasbro, Inc. (ASE:HAS). Hasbro Interactive has
+ expanded its charter to include original and licensed games for the PC, the
+ Playstation(R) and Nintendo(R) 64 game consoles and for multi-player gaming
+ over the internet. Headquartered in Beverly, Massachusetts, Hasbro Interactive
+ has offices in the U.K., France, Germany, Japan and Canada. For more information,
+ visit the Hasbro Interactive Web site at http://www.hasbro-interactive.com. 
+
+Files: debian/*
+Copyright: 2014 John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>
+License: GPL-3
+
+License: GPL-3
+ This program is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 2 of the License, or
+ (at your option) any later version.
+ .
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU General Public License
+ along with this program; if not, write to the Free Software
+ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+ 02110-1301, USA.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in `/usr/share/common-licenses/GPL-3'.

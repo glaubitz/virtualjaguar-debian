@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Virtual Jaguar
+Comment=Cross-platform Atari Jaguar emulator
+TryExec=virtualjaguar
+Exec=virtualjaguar %f
+StartupNotify=false
+Terminal=false
+Type=Application
+Icon=vj.xpm
+Categories=Game;Emulator;
+Keywords=Emulator;Atari;Console

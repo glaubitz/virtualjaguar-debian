@@ -1,0 +1,28 @@
+Source: virtualjaguar
+Section: otherosfs
+Priority: optional
+Maintainer: John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>
+Build-Depends: debhelper (>= 9.0.0), libqt4-dev, libqt4-opengl-dev, libsdl1.2-dev
+Standards-Version: 3.9.5
+Homepage: http://icculus.org/virtualjaguar/
+Vcs-Git: git://github.com/glaubitz/virtualjaguar-debian.git
+Vcs-Browser: https://github.com/glaubitz/virtualjaguar-debian
+
+Package: virtualjaguar
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Cross-platform Atari Jaguar emulator
+ Virtual Jaguar is a cross-platform emulator for Atari's infamous
+ Jaguar console, the last video game system to ever released by
+ the now defunct company. The Jaguar was marketed as the first
+ 64-bit video game system despite the fact that it was actually
+ a 32-bit system at heart, just the blitter operated in 64-bit
+ mode. The system was a commercial failure and eventually lead
+ to Atari leaving the market for video game systems.
+ .
+ This emulator features an intuitive user interface and emulation
+ of all of the major subsystems of the Atari Jaguar console. This
+ includes full GPU and DSP emulation as well as emulation of the
+ Atari Jaguar CD. Most of the commercial Atari games are supported,
+ albeit some of them have some minor glitches when running in the
+ emulator.

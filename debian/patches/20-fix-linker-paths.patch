@@ -1,0 +1,17 @@
+Description: 20-fix-linker-paths.patch
+ The virtaljaguar qmake project file from the original source
+ tarball misses the linker library search path for the m68k
+ emulation library. This patch adds it such that the linker
+ finds the library when linking the main binary.
+
+--- virtualjaguar-2.1.0.orig/virtualjaguar.pro
++++ virtualjaguar-2.1.0/virtualjaguar.pro
+@@ -16,7 +16,7 @@ TARGET     = virtualjaguar
+ CONFIG    += qt warn_on release
+ # debug
+ RESOURCES += virtualjaguar.qrc
+-LIBS      += -Lobj -ljaguarcore -lz -lm68k
++LIBS      += -Lobj -Lsrc/m68000/obj -ljaguarcore -lz -lm68k
+ QT        += opengl
+ 
+ # We stuff all the intermediate crap into obj/ so it won't confuse us mere mortals ;-)

@@ -1,0 +1,13 @@
+Description: 10-add-version-file.patch
+ The original source tarball is missing the version.h header
+ file which defines VJ_RELEASE_VERSION and VJ_RELEASE_SUBVERSION.
+ This patch adds that file, defining the release version as
+ 2.1.0 which is the current upstream version and sets the
+ sub-version as "debian" to indicate that this source has been
+ built for Debian.
+
+--- /dev/null
++++ virtualjaguar-2.1.0/version.h
+@@ -0,0 +1,2 @@
++#define VJ_RELEASE_VERSION "2.1.0"
++#define VJ_RELEASE_SUBVERSION "debian"
