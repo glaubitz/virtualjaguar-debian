@@ -10,5 +10,10 @@ override_dh_auto_build:
 	make -f jaguarcore.mak
 	make -C src/m68000
 	dh_auto_build
+
+# install docs/WHATSNEW as changelog.gz (Debian Policy 12.7)
+override_dh_installchangelogs:
+	dh_installchangelogs docs/WHATSNEW
+
 %:
 	dh $@ 
