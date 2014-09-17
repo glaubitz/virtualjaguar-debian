@@ -1,3 +1,16 @@
+virtualjaguar (2.1.0-2) unstable; urgency=medium
+
+  [ John Paul Adrian Glaubitz ]
+  * Fix wording in long description in debian/control.
+  * Add override for dh_installchangelogs in debian/rules to install docs/WHATSNEW as changelog.gz.
+  * Remove trailing space in debian/rules.
+
+  [ Teemu Hukkanen ]
+  * Add patch to use XDG_DATA_DIR for EEPROM and ROM files.
+  * Add patch to enable build support on Debian kFreeBSD.
+
+ -- John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>  Wed, 17 Sep 2014 14:17:26 +0200
+
 virtualjaguar (2.1.0-1) unstable; urgency=low
 
   * Initial release (Closes: 749579).
