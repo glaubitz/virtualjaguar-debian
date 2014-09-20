@@ -17,13 +17,13 @@ Copyright: 1995-2000 Bernd Schmidt <bernds@btinternet.com>
 	   2003-2013 James Hammons <jlhamm@acm.org>
 License: GPL-3
 
-Files: jagbios.cpp
-       jagcdbios.cpp
-       jagdevcdbios.cpp
-       jagstub1bios.cpp
-       jagstub2bios.cpp
-       universalhdr.cpp
-       wavetable.cpp
+Files: src/jagbios.cpp
+       src/jagcdbios.cpp
+       src/jagdevcdbios.cpp
+       src/jagstub1bios.cpp
+       src/jagstub2bios.cpp
+       src/universalhdr.cpp
+       src/wavetable.cpp
 Copyright: 1998-1999 Hasbro Interactive
 License: public-domain
  Press Release by Hasbro Interactive
