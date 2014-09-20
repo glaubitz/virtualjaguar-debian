@@ -1,3 +1,15 @@
+virtualjaguar (2.1.0-3) unstable; urgency=medium
+
+  [ Teemu Hukkanen ]
+  * Add patch to enable build support on Debian GNU/Hurd.
+
+  [ John Paul Adrian Glaubitz ]
+  * Fix relative paths of the public-domain files in debian/copyright.
+  * Remove docs/WHATSNEW from the files to be installed in debian/docs.
+  * Update standards version to 3.9.6 in debian/control, no changes required.
+
+ -- John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>  Sat, 20 Sep 2014 16:07:22 +0200
+
 virtualjaguar (2.1.0-2) unstable; urgency=medium
 
   [ John Paul Adrian Glaubitz ]
