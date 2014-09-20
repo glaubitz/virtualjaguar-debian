@@ -1,0 +1,18 @@
+Description: Detect GNU/Hurd
+Author: Teemu Hukkanen <tjhukkan@iki.fi>
+
+--- a/jaguarcore.mak
++++ b/jaguarcore.mak
+@@ -38,6 +38,12 @@
+ SYSTYPE    := __GCCUNIX__
+ SDLLIBTYPE := --libs
+ 
++# GNU/Hurd
++else ifeq "$(findstring GNU,$(OSTYPE))" "GNU"
++
++SYSTYPE    := __GCCUNIX__
++SDLLIBTYPE := --libs
++
+ # ??? Throw error, unknown OS
+ else
+ 
