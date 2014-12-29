@@ -1,3 +1,19 @@
+virtualjaguar (2.1.2-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Fix typo and scan for numeric versions in URL in debian/watch.
+  * Add myself to the list of uploaders in debian/control.
+  * Add V=1 during builds to enable verbose output in debian/rules.
+  * Fix path of README file in debian/docs.
+  * Don't use icon in debian/menu as it is too large.
+  * Drop debian/patches/50-hurd-support.patch, merged upstream.
+  * Drop debian/patches/40-kfreebsd-support.patch, merged upstream.
+  * Drop debian/patches/30-use-xdg-data-dir.patch, merged upstream.
+  * Drop debian/patches/20-fix-linker-paths.patch, merged upstream.
+  * Install 32x32 pixel version of the program icon for the Debian menu.
+
+ -- Teemu Hukkanen <tjhukkan@iki.fi>  Sat, 11 Oct 2014 12:11:47 +0100
+
 virtualjaguar (2.1.0-3) unstable; urgency=medium
 
   [ Teemu Hukkanen ]
