@@ -1,5 +1,5 @@
 <!DOCTYPE RCC><RCC version="1.0">
-<qresource>
+<qresource lang="en">
 	<file>../../res/vj-icon.png</file>
 	<file>../../res/power-off.png</file>
 	<file>../../res/power-on-red.png</file>
@@ -34,6 +34,13 @@
 	<file>../../res/skunkboard-file.png</file>
 	<file>../../res/homebrew-file.png</file>
 	<file>../../res/unknown-file.png</file>
+	<file>../../res/test-pattern.jpg</file>
 	<file>../../res/help.html</file>
+</qresource>
+<qresource lang="fr">
+	<file alias="/res/help.html">../../res/help_fr.html</file>
+</qresource>
+<qresource lang="gr">
+	<file alias="/res/help.html">../../res/help_gr.html</file>
 </qresource>
 </RCC>

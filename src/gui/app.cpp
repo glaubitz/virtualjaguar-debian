@@ -22,8 +22,8 @@
 #include "gamepad.h"
 #include "log.h"
 #include "mainwin.h"
+#include "profile.h"
 #include "settings.h"
-#include "types.h"
 #include "version.h"
 
 
@@ -49,8 +49,9 @@ QString filename;
 // Here's the main application loop--short and simple...
 int main(int argc, char * argv[])
 {
-	// Win32 console redirection, because MS and their band of super geniuses decided
-	// that nobody would ever launch an app from the command line. :-P
+	// Win32 console redirection, because MS and their band of super geniuses
+	// decided that nobody would ever launch an app from the command line. :-P
+	// [Unfortunately, this doesn't seem to work on Vista/7. :-(]
 #ifdef __GCCWIN32__
 	BOOL (WINAPI * AttachConsole)(DWORD dwProcessId);
 
@@ -108,6 +109,7 @@ int main(int argc, char * argv[])
 		WriteLog("VJ: SDL (joystick, audio) successfully initialized.\n");
 		App app(argc, argv);					// Declare an instance of the application
 		Gamepad::AllocateJoysticks();
+		AutoConnectProfiles();
 		retVal = app.exec();					// And run it!
 		Gamepad::DeallocateJoysticks();
 
@@ -187,7 +189,7 @@ bool ParseCommandLine(int argc, char * argv[])
 				"                 -z  Run Virtual Jaguar without \"snow\"\n"
 				"\n"
 				"Invoking Virtual Jagaur with no filename will cause it to boot up\n"
-				"with the VJ GUI.\n"
+				"with the VJ GUI. Using Alpine mode will enable log file.\n"
 				"\n");
 			return false;
 		}
@@ -204,6 +206,8 @@ bool ParseCommandLine(int argc, char * argv[])
 		{
 			printf("Alpine Mode enabled.\n");
 			vjs.hardwareTypeAlpine = true;
+			// We also enable logging as well :-)
+			useLogfile = true;
 		}
 
 		if ((strcmp(argv[i], "--please-dont-kill-my-computer") == 0) || (strcmp(argv[i], "-z") == 0))

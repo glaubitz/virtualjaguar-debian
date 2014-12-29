@@ -10,6 +10,9 @@
 
 //Hrm. uh??? I thought this wasn't the way to do this stuff...???
 #include <QtGui>
+#include "tom.h"
+
+#define RING_BUFFER_SIZE 32
 
 // Forward declarations
 class GLWidget;
@@ -40,7 +43,7 @@ class MainWin: public QMainWindow
 
 	private slots:
 		void Open(void);
- 		void Configure(void);
+		void Configure(void);
 		void Timer(void);
 		void TogglePowerState(void);
 		void ToggleRunState(void);
@@ -97,11 +100,16 @@ class MainWin: public QMainWindow
 		bool loadAndGo;
 		bool keyHeld[8];
 		bool fullScreen;
+		bool scannedSoftwareFolder;
 	public:
 		bool plzDontKillMyComputer;
+		uint32_t oldTimestamp;
+		uint32_t ringBufferPointer;
+		uint32_t ringBuffer[RING_BUFFER_SIZE];
 	private:
 		QPoint mainWinPosition;
 //		QSize mainWinSize;
+		int lastEditedProfile;
 		QMenu * fileMenu;
 		QMenu * helpMenu;
 		QMenu * debugMenu;
@@ -136,6 +144,7 @@ class MainWin: public QMainWindow
 
 		QIcon powerGreen;
 		QIcon powerRed;
+		uint32_t testPattern[VIRTUAL_SCREEN_WIDTH * VIRTUAL_SCREEN_HEIGHT_PAL];
 };
 
 #endif	// __MAINWIN_H__

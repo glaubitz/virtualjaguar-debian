@@ -8,6 +8,7 @@
 
 #include <QtGui>
 #include <QGLWidget>
+#include <stdint.h>
 
 class GLWidget: public QGLWidget
 {
@@ -17,6 +18,8 @@ class GLWidget: public QGLWidget
 		GLWidget(QWidget * parent = 0);
 		~GLWidget();
 
+		void HandleMouseHiding(void);
+		void CheckAndRestoreMouseCursor(void);
 //		QSize minimumSizeHint() const;
 //		QSize sizeHint() const;
 
@@ -24,11 +27,16 @@ class GLWidget: public QGLWidget
 //		void clicked();
 
 	protected:
-		void initializeGL();
-		void paintGL();
+		void initializeGL(void);
+		void paintGL(void);
 		void resizeGL(int width, int height);
+		void mouseMoveEvent(QMouseEvent *);
+//		void mousePressEvent(QMouseEvent * event);
+//		void mouseReleaseEvent(QMouseEvent * event);
 
-//	private:
+	private:
+		void CreateTextures(void);
+
 	public:
 		GLuint texture;
 		int textureWidth, textureHeight;
@@ -41,6 +49,7 @@ class GLWidget: public QGLWidget
 		int offset;
 		bool fullscreen;
 		int outputWidth;
+		int32_t hideMouseTimeout;
 };
 
 #endif	// __GLWIDGET_H__

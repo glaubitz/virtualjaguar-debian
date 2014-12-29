@@ -1,5 +1,5 @@
 //
-// SETTINGS.H: Header file
+// settings.h: Header file
 //
 
 #ifndef __SETTINGS_H__
@@ -10,34 +10,40 @@
 #include <limits.h>
 #define MAX_PATH		_POSIX_PATH_MAX
 #else
-#include <stdlib.h>								// for MAX_PATH on MinGW/Darwin
+#include <stdlib.h>				// for MAX_PATH on MinGW/Darwin
+// Kludge for Win64
+#ifndef MAX_PATH
+#define MAX_PATH _MAX_PATH		// Urgh.
 #endif
-#include "types.h"
+#endif
+#include <stdint.h>
 
 // Settings struct
 
 struct VJSettings
 {
 	bool useJoystick;
-	int32 joyport;								// Joystick port
-	bool hardwareTypeNTSC;						// Set to false for PAL
+	int32_t joyport;			// Joystick port
+	bool hardwareTypeNTSC;		// Set to false for PAL
 	bool useJaguarBIOS;
 	bool GPUEnabled;
 	bool DSPEnabled;
 	bool usePipelinedDSP;
 	bool fullscreen;
 	bool useOpenGL;
-	uint32 glFilter;
+	uint32_t glFilter;
 	bool hardwareTypeAlpine;
 	bool audioEnabled;
-	uint32 frameSkip;
-	uint32 renderType;
+	uint32_t frameSkip;
+	uint32_t renderType;
 	bool allowWritesToROM;
+	uint32_t biosType;
+	bool useFastBlitter;
 
 	// Keybindings in order of U, D, L, R, C, B, A, Op, Pa, 0-9, #, *
 
-	uint32 p1KeyBindings[21];
-	uint32 p2KeyBindings[21];
+	uint32_t p1KeyBindings[21];
+	uint32_t p2KeyBindings[21];
 
 	// Paths
 
@@ -53,10 +59,9 @@ struct VJSettings
 
 enum { RT_NORMAL = 0, RT_TV = 1 };
 
-// Exported functions
+// BIOS types
 
-//void LoadVJSettings(void);
-//void SaveVJSettings(void);
+enum { BT_K_SERIES, BT_M_SERIES, BT_STUBULATOR_1, BT_STUBULATOR_2 };
 
 // Exported variables
 
