@@ -7,7 +7,7 @@
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  ------------------------------------------------------------
 // JLH  07/18/2011  Created this file
 //
 
@@ -15,8 +15,15 @@
 #include "gamepad.h"
 
 
+// Class variables
+// These need to be preserved between calls to this class, otherwise bad stuff
+// (like controllers not working correctly) can happen.
+/*static*/ bool KeyGrabber::buttonDown = false;
+/*static*/ int KeyGrabber::button = -1;
+
+
 KeyGrabber::KeyGrabber(QWidget * parent/*= 0*/): QDialog(parent),
-	label(new QLabel), timer(new QTimer), buttonDown(false)
+	label(new QLabel), timer(new QTimer)//, buttonDown(false)
 {
 //	label = new QLabel(this);
 	QVBoxLayout * mainLayout = new QVBoxLayout;
@@ -62,17 +69,23 @@ void KeyGrabber::keyPressEvent(QKeyEvent * e)
 
 void KeyGrabber::CheckGamepad(void)
 {
-	// How do we determine which joystick it is, if more than one?
-	// Possibly by a combobox selecting the stick you want to configure...
+	// How do we determine which joystick it is, if more than one? As it turns
+	// out, we don't really have to care. It's up to the user to play nice with
+	// the interface because while we can enforce a 'first user to press a
+	// button wins' type of thing, it doesn't really buy you anything that you
+	// couldn't get by having the users involved behave like nice people. :-P
 	Gamepad::Update();
 
 	if (!buttonDown)
 	{
 		button = Gamepad::CheckButtonPressed();
 
-		if  (button == -1)
+		if (button == -1)
 			return;
 
+// Do it so that it sets the button on button down, not release :-P
+		key = button;
+		accept();
 		buttonDown = true;
 	}
 	else
@@ -80,8 +93,8 @@ void KeyGrabber::CheckGamepad(void)
 		if (Gamepad::CheckButtonPressed() == button)
 			return;
 
-		key = button;
-		accept();
+//		key = button;
+//		accept();
 		buttonDown = false;
 	}
 }

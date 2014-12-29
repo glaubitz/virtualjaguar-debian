@@ -6,7 +6,7 @@
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  ------------------------------------------------------------
 // JLH  12/23/2009  Created this file
 // JLH  12/20/2010  Added settings, menus & toolbars
 // JLH  07/05/2011  Added CD BIOS functionality to GUI
@@ -16,15 +16,18 @@
 //
 // - Add dbl click/enter to select in cart list, ESC to dimiss [DONE]
 // - Autoscan/autoload all available BIOS from 'software' folder [DONE]
-// - Add 1 key jumping in cartridge list (press 'R', jumps to carts starting with 'R', etc) [DONE]
+// - Add 1 key jumping in cartridge list (press 'R', jumps to carts starting
+//   with 'R', etc) [DONE]
 // - Controller configuration [DONE]
 //
 // STILL TO BE DONE:
 //
+// - Fix bug in switching between PAL & NTSC in fullscreen mode.
 // - Remove SDL dependencies (sound, mainly) from Jaguar core lib
-// - Fix inconsistency with trailing slashes in paths (eeproms needs one, software doesn't)
+// - Fix inconsistency with trailing slashes in paths (eeproms needs one,
+//   software doesn't)
 //
-// SFDX CODE: 9XF9TUHFM2359
+// SFDX CODE: S1E9T8H5M23YS
 
 // Uncomment this for debugging...
 //#define DEBUG
@@ -37,11 +40,13 @@
 #include "app.h"
 #include "about.h"
 #include "configdialog.h"
+#include "controllertab.h"
 #include "filepicker.h"
 #include "gamepad.h"
 #include "generaltab.h"
 #include "glwidget.h"
 #include "help.h"
+#include "profile.h"
 #include "settings.h"
 #include "version.h"
 #include "debug/cpubrowser.h"
@@ -52,13 +57,14 @@
 
 #include "dac.h"
 #include "jaguar.h"
-#include "tom.h"
 #include "log.h"
 #include "file.h"
 #include "jagbios.h"
+#include "jagbios2.h"
 #include "jagcdbios.h"
 #include "jagstub2bios.h"
 #include "joystick.h"
+#include "m68000/m68kinterface.h"
 
 // According to SebRmv, this header isn't seen on Arch Linux either... :-/
 //#ifdef __GCCWIN32__
@@ -78,15 +84,20 @@
 // We'll make the VJ core modular so that it doesn't matter what GUI is in
 // use, we can drop it in anywhere and use it as-is.
 
-//MainWin::MainWin(QString filenameToRun): running(true), powerButtonOn(false),
 MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 	showUntunedTankCircuit(true), cartridgeLoaded(false), CDActive(false),
-	//, alpineLoadSuccessful(false),
-//	pauseForFileSelector(false), loadAndGo(false), plzDontKillMyComputer(false)
-	pauseForFileSelector(false), loadAndGo(autoRun), plzDontKillMyComputer(false)
+	pauseForFileSelector(false), loadAndGo(autoRun), scannedSoftwareFolder(false), plzDontKillMyComputer(false)
 {
+	debugbar = NULL;
+
 	for(int i=0; i<8; i++)
 		keyHeld[i] = false;
+
+	// FPS management
+	for(int i=0; i<RING_BUFFER_SIZE; i++)
+		ringBuffer[i] = 0;
+
+	ringBufferPointer = RING_BUFFER_SIZE - 1;
 
 	videoWidget = new GLWidget(this);
 	setCentralWidget(videoWidget);
@@ -119,6 +130,7 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 //	quitAppAct->setShortcuts(QKeySequence::Quit);
 //	quitAppAct->setShortcut(QKeySequence(tr("Alt+x")));
 	quitAppAct->setShortcut(QKeySequence(tr("Ctrl+q")));
+	quitAppAct->setShortcutContext(Qt::ApplicationShortcut);
 	quitAppAct->setStatusTip(tr("Quit Virtual Jaguar"));
 	connect(quitAppAct, SIGNAL(triggered()), this, SLOT(close()));
 
@@ -144,6 +156,7 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 	pauseAct->setCheckable(true);
 	pauseAct->setDisabled(true);
 	pauseAct->setShortcut(QKeySequence(tr("Esc")));
+	pauseAct->setShortcutContext(Qt::ApplicationShortcut);
 	connect(pauseAct, SIGNAL(triggered()), this, SLOT(ToggleRunState()));
 
 	zoomActs = new QActionGroup(this);
@@ -191,11 +204,13 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 	filePickAct = new QAction(QIcon(":/res/software.png"), tr("&Insert Cartridge..."), this);
 	filePickAct->setStatusTip(tr("Insert a cartridge into Virtual Jaguar"));
 	filePickAct->setShortcut(QKeySequence(tr("Ctrl+i")));
+	filePickAct->setShortcutContext(Qt::ApplicationShortcut);
 	connect(filePickAct, SIGNAL(triggered()), this, SLOT(InsertCart()));
 
 	configAct = new QAction(QIcon(":/res/wrench.png"), tr("&Configure"), this);
 	configAct->setStatusTip(tr("Configure options for Virtual Jaguar"));
 	configAct->setShortcut(QKeySequence(tr("Ctrl+c")));
+	configAct->setShortcutContext(Qt::ApplicationShortcut);
 	connect(configAct, SIGNAL(triggered()), this, SLOT(Configure()));
 
 	useCDAct = new QAction(QIcon(":/res/compact-disc.png"), tr("&Use CD Unit"), this);
@@ -206,10 +221,13 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 
 	frameAdvanceAct = new QAction(QIcon(":/res/frame-advance.png"), tr("&Frame Advance"), this);
 	frameAdvanceAct->setShortcut(QKeySequence(tr("F7")));
+	frameAdvanceAct->setShortcutContext(Qt::ApplicationShortcut);
+	frameAdvanceAct->setDisabled(true);
 	connect(frameAdvanceAct, SIGNAL(triggered()), this, SLOT(FrameAdvance()));
 
 	fullScreenAct = new QAction(QIcon(":/res/fullscreen.png"), tr("F&ull Screen"), this);
 	fullScreenAct->setShortcut(QKeySequence(tr("F9")));
+	fullScreenAct->setShortcutContext(Qt::ApplicationShortcut);
 	fullScreenAct->setCheckable(true);
 	connect(fullScreenAct, SIGNAL(triggered()), this, SLOT(ToggleFullScreen()));
 
@@ -248,7 +266,7 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 	fileMenu = menuBar()->addMenu(tr("&Jaguar"));
 	fileMenu->addAction(powerAct);
 	fileMenu->addAction(pauseAct);
-	fileMenu->addAction(frameAdvanceAct);
+//	fileMenu->addAction(frameAdvanceAct);
 	fileMenu->addAction(filePickAct);
 	fileMenu->addAction(useCDAct);
 	fileMenu->addAction(configAct);
@@ -271,6 +289,7 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 	toolbar = addToolBar(tr("Stuff"));
 	toolbar->addAction(powerAct);
 	toolbar->addAction(pauseAct);
+	toolbar->addAction(frameAdvanceAct);
 	toolbar->addAction(filePickAct);
 	toolbar->addAction(useCDAct);
 	toolbar->addSeparator();
@@ -294,6 +313,15 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 		debugbar->addAction(riscDasmBrowseAct);
 	}
 
+	// Add actions to the main window, as hiding widgets with them
+	// disables them :-P
+	addAction(fullScreenAct);
+	addAction(quitAppAct);
+	addAction(configAct);
+	addAction(pauseAct);
+	addAction(filePickAct);
+	addAction(frameAdvanceAct);
+
 	//	Create status bar
 	statusBar()->showMessage(tr("Ready"));
 
@@ -301,6 +329,21 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 
 	// Do this in case original size isn't correct (mostly for the first-run case)
 	ResizeMainWindow();
+
+	// Create our test pattern bitmap
+	QImage tempImg(":/res/test-pattern.jpg");
+	QImage tempImgScaled = tempImg.scaled(VIRTUAL_SCREEN_WIDTH, VIRTUAL_SCREEN_HEIGHT_PAL, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+
+	for(uint32_t y=0; y<VIRTUAL_SCREEN_HEIGHT_PAL; y++)
+	{
+		const QRgb * scanline = (QRgb *)tempImgScaled.constScanLine(y);
+
+		for(uint32_t x=0; x<VIRTUAL_SCREEN_WIDTH; x++)
+		{
+			uint32_t pixel = (qRed(scanline[x]) << 24) | (qGreen(scanline[x]) << 16) | (qBlue(scanline[x]) << 8) | 0xFF;
+			testPattern[(y * VIRTUAL_SCREEN_WIDTH) + x] = pixel;
+		}
+	}
 
 	// Set up timer based loop for animation...
 	timer = new QTimer(this);
@@ -319,19 +362,13 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 	WriteLog("Virtual Jaguar %s (Last full build was on %s %s)\n", VJ_RELEASE_VERSION, __DATE__, __TIME__);
 	WriteLog("VJ: Initializing jaguar subsystem...\n");
 	JaguarInit();
-	memcpy(jagMemSpace + 0xE00000, jaguarBootROM, 0x20000);	// Use the stock BIOS
+//	memcpy(jagMemSpace + 0xE00000, jaguarBootROM, 0x20000);	// Use the stock BIOS
+	memcpy(jagMemSpace + 0xE00000, (vjs.biosType == BT_K_SERIES ? jaguarBootROM : jaguarBootROM2), 0x20000);	// Use the stock BIOS
 
-	// Check for filename passed in on the command line...
-//	if (!filenameToRun.isEmpty())
+	// Prevent the file scanner from running if filename passed
+	// in on the command line...
 	if (autoRun)
-	{
-//		loadAndGo = true;
-		// Attempt to load/run the file the user passed in...
-//		LoadSoftware(filenameToRun);
-////		memcpy(jagMemSpace + 0xE00000, jaguarBootROM, 0x20000);	// Use the stock BIOS
-		// Prevent the file scanner from running...
 		return;
-	}
 
 	// Load up the default ROM if in Alpine mode:
 	if (vjs.hardwareTypeAlpine)
@@ -354,12 +391,11 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 		// Prevent the scanner from running...
 		return;
 	}
-//	else
-//		memcpy(jagMemSpace + 0xE00000, jaguarBootROM, 0x20000);	// Otherwise, use the stock BIOS
 
 	// Run the scanner if nothing passed in and *not* Alpine mode...
 	// NB: Really need to look into caching the info scanned in here...
 	filePickWin->ScanSoftwareFolder(allowUnknownSoftware);
+	scannedSoftwareFolder = true;
 }
 
 
@@ -382,6 +418,7 @@ void MainWin::SyncUI(void)
 	palAct->setChecked(!vjs.hardwareTypeNTSC);
 	powerAct->setIcon(vjs.hardwareTypeNTSC ? powerRed : powerGreen);
 
+	fullScreenAct->setChecked(vjs.fullscreen);
 	fullScreen = vjs.fullscreen;
 	SetFullScreen(fullScreen);
 
@@ -403,13 +440,57 @@ void MainWin::closeEvent(QCloseEvent * event)
 
 void MainWin::keyPressEvent(QKeyEvent * e)
 {
+	// From jaguar.cpp
+	extern bool startM68KTracing;
+	// From joystick.cpp
+	extern int blit_start_log;
+	// From blitter.cpp
+	extern bool startConciseBlitLogging;
+
+
 	// We ignore the Alt key for now, since it causes problems with the GUI
 	if (e->key() == Qt::Key_Alt)
 	{
 		e->accept();
 		return;
 	}
+	else if (e->key() == Qt::Key_F11)
+	{
+		startM68KTracing = true;
+		e->accept();
+		return;
+	}
+	else if (e->key() == Qt::Key_F12)
+	{
+		blit_start_log = true;
+		e->accept();
+		return;
+	}
+	else if (e->key() == Qt::Key_F10)
+	{
+		startConciseBlitLogging = true;
+		e->accept();
+		return;
+	}
+	else if (e->key() == Qt::Key_F8)
+	{
+		// ggn: For extra NYAN pleasure...
+		// ggn: There you go James :P
+		// Shamus: Thanks for the patch! :-D
+		WriteLog("    o  +           +        +\n");
+		WriteLog("+        o     o       +        o\n");
+		WriteLog("-_-_-_-_-_-_-_,------,      o \n");
+		WriteLog("_-_-_-_-_-_-_-|   /\\_/\\  \n");
+		WriteLog("-_-_-_-_-_-_-~|__( ^ .^)  +     +  \n");
+		WriteLog("_-_-_-_-_-_-_-\"\"  \"\"      \n");
+		WriteLog("+      o         o   +       o\n");
+		WriteLog("    +         +\n");
+		e->accept();
+		return;
+	}
+
 /*
+This is done now by a QAction...
 	if (e->key() == Qt::Key_F9)
 	{
 		ToggleFullScreen();
@@ -437,40 +518,9 @@ void MainWin::HandleKeys(QKeyEvent * e, bool state)
 {
 	enum { P1LEFT = 0, P1RIGHT, P1UP, P1DOWN, P2LEFT, P2RIGHT, P2UP, P2DOWN };
 	// We kill bad key combos here, before they can get to the emulator...
-	// This also kills the illegal instruction problem that cropped up in Rayman!
-	// May want to do this by killing the old one instead of ignoring the new one...
-	// Seems to work better that way...
+	// This also kills the illegal instruction problem that cropped up in
+	// Rayman!
 
-// The problem with this approach is that it causes bad results because it doesn't do
-// any checking of previous states. Need to come up with something better because this
-// causes problems where the keyboard acts as if it were unresponsive. :-P
-#if 0
-	if ((e->key() == vjs.p1KeyBindings[BUTTON_L] && joypad_0_buttons[BUTTON_R])
-		|| (e->key() == vjs.p1KeyBindings[BUTTON_R] && joypad_0_buttons[BUTTON_L])
-		|| (e->key() == vjs.p1KeyBindings[BUTTON_U] && joypad_0_buttons[BUTTON_D])
-		|| (e->key() == vjs.p1KeyBindings[BUTTON_D] && joypad_0_buttons[BUTTON_U]))
-		return;
-#else
-#if 0
-	if (e->key() == (int)vjs.p1KeyBindings[BUTTON_L] && joypad_0_buttons[BUTTON_R])
-		joypad_0_buttons[BUTTON_R] = 0;
-	if (e->key() == (int)vjs.p1KeyBindings[BUTTON_R] && joypad_0_buttons[BUTTON_L])
-		joypad_0_buttons[BUTTON_L] = 0;
-	if (e->key() == (int)vjs.p1KeyBindings[BUTTON_U] && joypad_0_buttons[BUTTON_D])
-		joypad_0_buttons[BUTTON_D] = 0;
-	if (e->key() == (int)vjs.p1KeyBindings[BUTTON_D] && joypad_0_buttons[BUTTON_U])
-		joypad_0_buttons[BUTTON_U] = 0;
-
-	if (e->key() == (int)vjs.p2KeyBindings[BUTTON_L] && joypad_1_buttons[BUTTON_R])
-		joypad_1_buttons[BUTTON_R] = 0;
-	if (e->key() == (int)vjs.p2KeyBindings[BUTTON_R] && joypad_1_buttons[BUTTON_L])
-		joypad_1_buttons[BUTTON_L] = 0;
-	if (e->key() == (int)vjs.p2KeyBindings[BUTTON_U] && joypad_1_buttons[BUTTON_D])
-		joypad_1_buttons[BUTTON_D] = 0;
-	if (e->key() == (int)vjs.p2KeyBindings[BUTTON_D] && joypad_1_buttons[BUTTON_U])
-		joypad_1_buttons[BUTTON_U] = 0;
-#else
-//hrm, this still has sticky state problems... Ugh!
 	// First, settle key states...
 	if (e->key() == (int)vjs.p1KeyBindings[BUTTON_L])
 		keyHeld[P1LEFT] = state;
@@ -489,42 +539,45 @@ void MainWin::HandleKeys(QKeyEvent * e, bool state)
 	else if (e->key() == (int)vjs.p2KeyBindings[BUTTON_D])
 		keyHeld[P2DOWN] = state;
 
-	// Next, check for conflicts and bail out if there are any...
-	if ((keyHeld[P1LEFT] && keyHeld[P1RIGHT])
-		|| (keyHeld[P1UP] && keyHeld[P1DOWN])
-		|| (keyHeld[P2LEFT] && keyHeld[P2RIGHT])
-		|| (keyHeld[P2UP] && keyHeld[P2DOWN]))
-		return;
-#endif
-#endif
+	// Next, check for conflicts and kill 'em if there are any...
+	if (keyHeld[P1LEFT] && keyHeld[P1RIGHT])
+		keyHeld[P1LEFT] = keyHeld[P1RIGHT] = false;
 
-	// No bad combos exist, let's stuff the emulator key buffers...!
+	if (keyHeld[P1UP] && keyHeld[P1DOWN])
+		keyHeld[P1UP] = keyHeld[P1DOWN] = false;
+
+	if (keyHeld[P2LEFT] && keyHeld[P2RIGHT])
+		keyHeld[P2LEFT] = keyHeld[P2RIGHT] = false;
+
+	if (keyHeld[P2UP] && keyHeld[P2DOWN])
+		keyHeld[P2UP] = keyHeld[P2DOWN] = false;
+
+	// No bad combos exist now, let's stuff the emulator key buffers...!
 	for(int i=BUTTON_FIRST; i<=BUTTON_LAST; i++)
 	{
 		if (e->key() == (int)vjs.p1KeyBindings[i])
-//			joypad_0_buttons[i] = (uint8)state;
-			joypad_0_buttons[i] = (state ? 0x01 : 0x00);
+			joypad0Buttons[i] = (state ? 0x01 : 0x00);
 
-// Pad #2 is screwing up pad #1. Prolly a problem in joystick.cpp...
-// So let's try to fix it there. :-P [DONE]
 		if (e->key() == (int)vjs.p2KeyBindings[i])
-//			joypad_1_buttons[i] = (uint8)state;
-			joypad_1_buttons[i] = (state ? 0x01 : 0x00);
+			joypad1Buttons[i] = (state ? 0x01 : 0x00);
 	}
 }
 
 
+//
+// N.B.: The profile system AutoConnect functionality sets the gamepad IDs here.
+//
 void MainWin::HandleGamepads(void)
 {
 	Gamepad::Update();
 
 	for(int i=BUTTON_FIRST; i<=BUTTON_LAST; i++)
 	{
-		if (vjs.p1KeyBindings[i] & (JOY_BUTTON | JOY_HAT))
-			joypad_0_buttons[i] = (Gamepad::GetState(0, vjs.p1KeyBindings[i]) ? 0x01 : 0x00);
+		if (vjs.p1KeyBindings[i] & (JOY_BUTTON | JOY_HAT | JOY_AXIS))
+			joypad0Buttons[i] = (Gamepad::GetState(gamepadIDSlot1, vjs.p1KeyBindings[i]) ? 0x01 : 0x00);
 
-		if (vjs.p2KeyBindings[i] & (JOY_BUTTON | JOY_HAT))
-			joypad_1_buttons[i] = (Gamepad::GetState(1, vjs.p2KeyBindings[i]) ? 0x01 : 0x00);
+		if (vjs.p2KeyBindings[i] & (JOY_BUTTON | JOY_HAT | JOY_AXIS))
+			joypad1Buttons[i] = (Gamepad::GetState(gamepadIDSlot2, vjs.p2KeyBindings[i]) ? 0x01 : 0x00);
 	}
 }
 
@@ -540,9 +593,17 @@ void MainWin::Configure(void)
 	ConfigDialog dlg(this);
 	//ick.
 	dlg.generalTab->useUnknownSoftware->setChecked(allowUnknownSoftware);
+	dlg.controllerTab1->profileNum = lastEditedProfile;
+	dlg.controllerTab1->SetupLastUsedProfile();
+// maybe instead of this, we tell the controller tab to work on a copy that gets
+// written if the user hits 'OK'.
+	SaveProfiles();		// Just in case user cancels
 
 	if (dlg.exec() == false)
+	{
+		RestoreProfiles();
 		return;
+	}
 
 	QString before = vjs.ROMPath;
 	QString alpineBefore = vjs.alpineROMPath;
@@ -559,6 +620,8 @@ void MainWin::Configure(void)
 	bool allowOld = allowUnknownSoftware;
 	//ick.
 	allowUnknownSoftware = dlg.generalTab->useUnknownSoftware->isChecked();
+	lastEditedProfile = dlg.controllerTab1->profileNum;
+	AutoConnectProfiles();
 
 	// We rescan the "software" folder if the user either changed the path or
 	// checked/unchecked the "Allow unknown files" option in the config dialog.
@@ -609,6 +672,16 @@ void MainWin::Configure(void)
 //
 void MainWin::Timer(void)
 {
+#if 0
+static uint32_t ntscTickCount;
+	if (vjs.hardwareTypeNTSC)
+	{
+		ntscTickCount++;
+		ntscTickCount %= 3;
+		timer->start(16 + (ntscTickCount == 0 ? 1 : 0));
+	}
+#endif
+
 	if (!running)
 		return;
 
@@ -634,9 +707,37 @@ void MainWin::Timer(void)
 		// Otherwise, run the Jaguar simulation
 		HandleGamepads();
 		JaguarExecuteNew();
+		videoWidget->HandleMouseHiding();
 	}
 
 	videoWidget->updateGL();
+
+	// FPS handling
+	// Approach: We use a ring buffer to store times (in ms) over a given
+	// amount of frames, then sum them to figure out the FPS.
+	uint32_t timestamp = SDL_GetTicks();
+	// This assumes the ring buffer size is a power of 2
+//	ringBufferPointer = (ringBufferPointer + 1) & (RING_BUFFER_SIZE - 1);
+	// Doing it this way is better. Ring buffer size can be arbitrary then.
+	ringBufferPointer = (ringBufferPointer + 1) % RING_BUFFER_SIZE;
+	ringBuffer[ringBufferPointer] = timestamp - oldTimestamp;
+	uint32_t elapsedTime = 0;
+
+	for(uint32_t i=0; i<RING_BUFFER_SIZE; i++)
+		elapsedTime += ringBuffer[i];
+
+	// elapsedTime must be non-zero
+	if (elapsedTime == 0)
+		elapsedTime = 1;
+
+	// This is in frames per 10 seconds, so we can have 1 decimal
+	uint32_t framesPerSecond = (uint32_t)(((float)RING_BUFFER_SIZE / (float)elapsedTime) * 10000.0);
+	uint32_t fpsIntegerPart = framesPerSecond / 10;
+	uint32_t fpsDecimalPart = framesPerSecond % 10;
+	// If this is updated too frequently to be useful, we can throttle it down
+	// so that it only updates every 10th frame or so
+	statusBar()->showMessage(QString("%1.%2 FPS").arg(fpsIntegerPart).arg(fpsDecimalPart));
+	oldTimestamp = timestamp;
 }
 
 
@@ -648,16 +749,28 @@ void MainWin::TogglePowerState(void)
 	// With the power off, we simulate white noise on the screen. :-)
 	if (!powerButtonOn)
 	{
+		// Restore the mouse pointer, if hidden:
+		videoWidget->CheckAndRestoreMouseCursor();
 		useCDAct->setDisabled(false);
 		palAct->setDisabled(false);
 		ntscAct->setDisabled(false);
 		pauseAct->setChecked(false);
 		pauseAct->setDisabled(true);
 		showUntunedTankCircuit = true;
-		// This is just in case the ROM we were playing was in a narrow or wide field mode,
-		// so the untuned tank sim doesn't look wrong. :-)
 		DACPauseAudioThread();
+		// This is just in case the ROM we were playing was in a narrow or wide
+		// field mode, so the untuned tank sim doesn't look wrong. :-)
 		TOMReset();
+
+		if (plzDontKillMyComputer)
+		{
+			// We have to do it line by line, because the texture pitch is not
+			// the same as the picture buffer's pitch.
+			for(uint32_t y=0; y<videoWidget->rasterHeight; y++)
+			{
+				memcpy(videoWidget->buffer + (y * videoWidget->textureWidth), testPattern + (y * VIRTUAL_SCREEN_WIDTH), VIRTUAL_SCREEN_WIDTH * sizeof(uint32_t));
+			}
+		}
 	}
 	else
 	{
@@ -672,10 +785,10 @@ void MainWin::TogglePowerState(void)
 		if (CDActive)
 		{
 // Should check for cartridgeLoaded here as well...!
-// We can clear it when toggling CDActive on, so that when we power cycle it does the
-// expected thing. Otherwise, if we use the file picker to insert a cart, we expect
-// to run the cart! Maybe have a RemoveCart function that only works if the CD unit
-// is active?
+// We can clear it when toggling CDActive on, so that when we power cycle it
+// does the expected thing. Otherwise, if we use the file picker to insert a
+// cart, we expect to run the cart! Maybe have a RemoveCart function that only
+// works if the CD unit is active?
 			setWindowTitle(QString("Virtual Jaguar " VJ_RELEASE_VERSION
 				" - Now playing: Jaguar CD"));
 		}
@@ -693,6 +806,10 @@ void MainWin::ToggleRunState(void)
 
 	if (!running)
 	{
+		// Restore the mouse pointer, if hidden:
+		videoWidget->CheckAndRestoreMouseCursor();
+		frameAdvanceAct->setDisabled(false);
+
 		for(uint32_t i=0; i<(uint32_t)(videoWidget->textureWidth * 256); i++)
 		{
 			uint32_t pixel = videoWidget->buffer[i];
@@ -703,6 +820,8 @@ void MainWin::ToggleRunState(void)
 
 		videoWidget->updateGL();
 	}
+	else
+		frameAdvanceAct->setDisabled(true);
 
 	// Pause/unpause any running/non-running threads...
 	DACPauseAudioThread(!running);
@@ -771,6 +890,14 @@ void MainWin::ShowHelpWin(void)
 
 void MainWin::InsertCart(void)
 {
+	// Check to see if we did autorun, 'cause we didn't load anything in that
+	// case
+	if (!scannedSoftwareFolder)
+	{
+		filePickWin->ScanSoftwareFolder(allowUnknownSoftware);
+		scannedSoftwareFolder = true;
+	}
+
 	// If the emulator is running, we pause it here and unpause it later
 	// if we dismiss the file selector without choosing anything
 	if (running && powerButtonOn)
@@ -801,8 +928,6 @@ void MainWin::LoadSoftware(QString file)
 {
 	running = false;							// Prevent bad things(TM) from happening...
 	pauseForFileSelector = false;				// Reset the file selector pause flag
-	SET32(jaguarMainRAM, 0, 0x00200000);		// Set top of stack...
-	cartridgeLoaded = JaguarLoadFile(file.toAscii().data());
 
 	char * biosPointer = jaguarBootROM;
 
@@ -815,6 +940,16 @@ void MainWin::LoadSoftware(QString file)
 	powerAct->setChecked(true);
 	powerButtonOn = false;
 	TogglePowerState();
+	// We have to load our software *after* the Jaguar RESET
+	cartridgeLoaded = JaguarLoadFile(file.toAscii().data());
+	SET32(jaguarMainRAM, 0, 0x00200000);		// Set top of stack...
+
+	// This is icky because we've already done it
+// it gets worse :-P
+if (!vjs.useJaguarBIOS)
+	SET32(jaguarMainRAM, 4, jaguarRunAddress);
+
+	m68k_pulse_reset();
 
 	if (!vjs.hardwareTypeAlpine && !loadAndGo)
 	{
@@ -829,22 +964,11 @@ void MainWin::ToggleCDUsage(void)
 {
 	CDActive = !CDActive;
 
-#if 0
-	if (CDActive)
-	{
-		powerAct->setDisabled(false);
-	}
-	else
-	{
-		powerAct->setDisabled(true);
-	}
-#else
 	// Set up the Jaguar CD for execution, otherwise, clear memory
 	if (CDActive)
 		memcpy(jagMemSpace + 0x800000, jaguarCDBootROM, 0x40000);
 	else
 		memset(jagMemSpace + 0x800000, 0xFF, 0x40000);
-#endif
 }
 
 
@@ -854,6 +978,8 @@ void MainWin::FrameAdvance(void)
 	// Execute 1 frame, then exit (only useful in Pause mode)
 	JaguarExecuteNew();
 	videoWidget->updateGL();
+	// Need to execute 1 frames' worth of DSP thread as well :-/
+#warning "!!! Need to execute the DSP thread for 1 frame too !!!"
 }
 
 
@@ -862,23 +988,28 @@ void MainWin::SetFullScreen(bool state/*= true*/)
 	if (state)
 	{
 		mainWinPosition = pos();
-//		mainWinSize = size();
 		menuBar()->hide();
 		statusBar()->hide();
+		toolbar->hide();
+
+		if (debugbar)
+			debugbar->hide();
+
 		showFullScreen();
-		QRect r = QApplication::desktop()->availableGeometry();
-//		double targetWidth = 320.0, targetHeight = (vjs.hardwareTypeNTSC ? 240.0 : 256.0);
+		// This is needed because the fullscreen may happen on a different
+		// screen than screen 0:
+		int screenNum = QApplication::desktop()->screenNumber(videoWidget);
+//		QRect r = QApplication::desktop()->availableGeometry(screenNum);
+		QRect r = QApplication::desktop()->screenGeometry(screenNum);
 		double targetWidth = (double)VIRTUAL_SCREEN_WIDTH,
 			targetHeight = (double)(vjs.hardwareTypeNTSC ? VIRTUAL_SCREEN_HEIGHT_NTSC : VIRTUAL_SCREEN_HEIGHT_PAL);
 		double aspectRatio = targetWidth / targetHeight;
-		// NOTE: Really should check here to see which dimension constrains the other.
-		//       Right now, we assume that height is the constraint.
+		// NOTE: Really should check here to see which dimension constrains the
+		//       other. Right now, we assume that height is the constraint.
 		int newWidth = (int)(aspectRatio * (double)r.height());
 		videoWidget->offset = (r.width() - newWidth) / 2;
 		videoWidget->fullscreen = true;
 		videoWidget->outputWidth = newWidth;
-
-//		videoWidget->setFixedSize(newWidth, r.height());
 		videoWidget->setFixedSize(r.width(), r.height());
 		showFullScreen();
 	}
@@ -889,14 +1020,15 @@ void MainWin::SetFullScreen(bool state/*= true*/)
 		videoWidget->fullscreen = false;
 		menuBar()->show();
 		statusBar()->show();
+		toolbar->show();
+
+		if (debugbar)
+			debugbar->show();
+
 		showNormal();
 		ResizeMainWindow();
 		move(mainWinPosition);
 	}
-
-	// For some reason, this doesn't work: If the emu is paused, toggling from
-	// fullscreen to windowed (& vice versa) shows a white screen.
-//	videoWidget->updateGL();
 }
 
 
@@ -944,9 +1076,18 @@ void MainWin::ShowRISCDasmBrowserWin(void)
 
 void MainWin::ResizeMainWindow(void)
 {
-//	videoWidget->setFixedSize(zoomLevel * 320, zoomLevel * (vjs.hardwareTypeNTSC ? 240 : 256));
 	videoWidget->setFixedSize(zoomLevel * VIRTUAL_SCREEN_WIDTH,
 		zoomLevel * (vjs.hardwareTypeNTSC ? VIRTUAL_SCREEN_HEIGHT_NTSC : VIRTUAL_SCREEN_HEIGHT_PAL));
+
+	// Show the test pattern if user requested plzDontKillMyComputer mode
+	if (!powerButtonOn && plzDontKillMyComputer)
+	{
+		for(uint32_t y=0; y<videoWidget->rasterHeight; y++)
+		{
+			memcpy(videoWidget->buffer + (y * videoWidget->textureWidth), testPattern + (y * VIRTUAL_SCREEN_WIDTH), VIRTUAL_SCREEN_WIDTH * sizeof(uint32_t));
+		}
+	}
+
 	show();
 
 	for(int i=0; i<2; i++)
@@ -972,6 +1113,7 @@ void MainWin::ReadSettings(void)
 
 	zoomLevel = settings.value("zoom", 2).toInt();
 	allowUnknownSoftware = settings.value("showUnknownSoftware", false).toBool();
+	lastEditedProfile = settings.value("lastEditedProfile", 0).toInt();
 
 	vjs.useJoystick      = settings.value("useJoystick", false).toBool();
 	vjs.joyport          = settings.value("joyport", 0).toInt();
@@ -979,7 +1121,7 @@ void MainWin::ReadSettings(void)
 	vjs.frameSkip        = settings.value("frameSkip", 0).toInt();
 	vjs.useJaguarBIOS    = settings.value("useJaguarBIOS", false).toBool();
 	vjs.GPUEnabled       = settings.value("GPUEnabled", true).toBool();
-	vjs.DSPEnabled       = settings.value("DSPEnabled", false).toBool();
+	vjs.DSPEnabled       = settings.value("DSPEnabled", true).toBool();
 	vjs.audioEnabled     = settings.value("audioEnabled", true).toBool();
 	vjs.usePipelinedDSP  = settings.value("usePipelinedDSP", false).toBool();
 	vjs.fullscreen       = settings.value("fullscreen", false).toBool();
@@ -987,15 +1129,14 @@ void MainWin::ReadSettings(void)
 	vjs.glFilter         = settings.value("glFilterType", 1).toInt();
 	vjs.renderType       = settings.value("renderType", 0).toInt();
 	vjs.allowWritesToROM = settings.value("writeROM", false).toBool();
-//	strcpy(vjs.jagBootPath, settings.value("JagBootROM", "./bios/[BIOS] Atari Jaguar (USA, Europe).zip").toString().toAscii().data());
-//	strcpy(vjs.CDBootPath, settings.value("CDBootROM", "./bios/jagcd.rom").toString().toAscii().data());
-	strcpy(vjs.EEPROMPath, settings.value("EEPROMs", "./eeproms/").toString().toAscii().data());
-	strcpy(vjs.ROMPath, settings.value("ROMs", "./software/").toString().toAscii().data());
+	vjs.biosType         = settings.value("biosType", BT_M_SERIES).toInt();
+	vjs.useFastBlitter   = settings.value("useFastBlitter", false).toBool();
+	strcpy(vjs.EEPROMPath, settings.value("EEPROMs", QDesktopServices::storageLocation(QDesktopServices::DataLocation).append("/eeproms/")).toString().toAscii().data());
+	strcpy(vjs.ROMPath, settings.value("ROMs", QDesktopServices::storageLocation(QDesktopServices::DataLocation).append("/software/")).toString().toAscii().data());
 	strcpy(vjs.alpineROMPath, settings.value("DefaultROM", "").toString().toAscii().data());
 	strcpy(vjs.absROMPath, settings.value("DefaultABS", "").toString().toAscii().data());
+
 WriteLog("MainWin: Paths\n");
-//WriteLog("    jagBootPath = \"%s\"\n", vjs.jagBootPath);
-//WriteLog("    CDBootPath  = \"%s\"\n", vjs.CDBootPath);
 WriteLog("   EEPROMPath = \"%s\"\n", vjs.EEPROMPath);
 WriteLog("      ROMPath = \"%s\"\n", vjs.ROMPath);
 WriteLog("AlpineROMPath = \"%s\"\n", vjs.alpineROMPath);
@@ -1046,6 +1187,8 @@ WriteLog("Pipelined DSP = %s\n", (vjs.usePipelinedDSP ? "ON" : "off"));
 	vjs.p2KeyBindings[BUTTON_9] = settings.value("p2k_9", Qt::Key_9).toInt();
 	vjs.p2KeyBindings[BUTTON_d] = settings.value("p2k_pound", Qt::Key_Slash).toInt();
 	vjs.p2KeyBindings[BUTTON_s] = settings.value("p2k_star", Qt::Key_Asterisk).toInt();
+
+	ReadProfiles(&settings);
 }
 
 
@@ -1058,6 +1201,7 @@ void MainWin::WriteSettings(void)
 
 	settings.setValue("zoom", zoomLevel);
 	settings.setValue("showUnknownSoftware", allowUnknownSoftware);
+	settings.setValue("lastEditedProfile", lastEditedProfile);
 
 	settings.setValue("useJoystick", vjs.useJoystick);
 	settings.setValue("joyport", vjs.joyport);
@@ -1073,6 +1217,8 @@ void MainWin::WriteSettings(void)
 	settings.setValue("glFilterType", vjs.glFilter);
 	settings.setValue("renderType", vjs.renderType);
 	settings.setValue("writeROM", vjs.allowWritesToROM);
+	settings.setValue("biosType", vjs.biosType);
+	settings.setValue("useFastBlitter", vjs.useFastBlitter);
 	settings.setValue("JagBootROM", vjs.jagBootPath);
 	settings.setValue("CDBootROM", vjs.CDBootPath);
 	settings.setValue("EEPROMs", vjs.EEPROMPath);
@@ -1123,6 +1269,8 @@ void MainWin::WriteSettings(void)
 	settings.setValue("p2k_9", vjs.p2KeyBindings[BUTTON_9]);
 	settings.setValue("p2k_pound", vjs.p2KeyBindings[BUTTON_d]);
 	settings.setValue("p2k_star", vjs.p2KeyBindings[BUTTON_s]);
+
+	WriteProfiles(&settings);
 }
 
 
@@ -1135,3 +1283,4 @@ void MainWin::WriteUISettings(void)
 
 	settings.setValue("zoom", zoomLevel);
 }
+

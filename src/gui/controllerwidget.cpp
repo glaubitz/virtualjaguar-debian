@@ -19,8 +19,8 @@
 #include "keygrabber.h"
 
 
-// These tables are used to convert Qt keycodes into human readable form. Note that
-// a lot of these are just filler.
+// These tables are used to convert Qt keycodes into human readable form. Note
+// that a lot of these are just filler.
 char ControllerWidget::keyName1[96][16] = {
 	"Space",
 	"!", "\"", "#", "$", "%", "&", "'", "(", ")", "*", "+", ",", "-", ".", "/",
@@ -44,6 +44,8 @@ char ControllerWidget::keyName2[64][16] = {
 
 char ControllerWidget::hatName[4][16] = { "Up", "Rt", "Dn", "Lf" };
 
+char ControllerWidget::axisName[2][8] = { "+", "-" };
+
 // This is hard-coded crap. It's crap-tastic!
 // These are the positions to draw the button names at, ordered by the BUTTON_* sequence
 // found in joystick.h.
@@ -63,6 +65,8 @@ ControllerWidget::ControllerWidget(QWidget * parent/*= 0*/): QWidget(parent),
 	widgetSize += QSize(4, 4);
 	// We want to know when the mouse is moving over our widget...
 	setMouseTracking(true);
+//nope
+//setFixedSize(widgetSize);
 }
 
 
@@ -147,6 +151,11 @@ void ControllerWidget::paintEvent(QPaintEvent * /*event*/)
 			DrawBorderedText(painter, buttonPos[i][0], buttonPos[i][1],
 				QString("j%1").arg(hatName[keys[i] & JOY_BUTTON_MASK]));
 		}
+		else if (keys[i] & JOY_AXIS)
+		{
+			DrawBorderedText(painter, buttonPos[i][0], buttonPos[i][1],
+				QString("JA%1%2").arg((keys[i] & JOY_AXISNUM_MASK) >> 1).arg(axisName[keys[i] & JOY_AXISDIR_MASK]));
+		}
 #endif
 		else
 			DrawBorderedText(painter, buttonPos[i][0], buttonPos[i][1], QString("???"));
@@ -164,7 +173,8 @@ void ControllerWidget::mousePressEvent(QMouseEvent * /*event*/)
 void ControllerWidget::mouseReleaseEvent(QMouseEvent * /*event*/)
 {
 	mouseDown = false;
-	// Spawning the keygrabber causes leaveEvent() to be called, so we need to save this
+	// Spawning the keygrabber causes leaveEvent() to be called, so we need to
+	// save this
 	int keyToHighlightSave = keyToHighlight;
 
 	KeyGrabber keyGrab(this);
@@ -173,7 +183,10 @@ void ControllerWidget::mouseReleaseEvent(QMouseEvent * /*event*/)
 	int key = keyGrab.key;
 
 	if (key != Qt::Key_Escape)
+	{
 		keys[keyToHighlightSave] = key;
+		emit(KeyDefined(keyToHighlightSave, key));
+	}
 
 	keyToHighlight = keyToHighlightSave;
 	update();

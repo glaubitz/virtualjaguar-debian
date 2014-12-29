@@ -25,11 +25,12 @@
 
 
 GLWidget::GLWidget(QWidget * parent/*= 0*/): QGLWidget(parent), texture(0),
-	textureWidth(0), textureHeight(0), buffer(0), rasterWidth(340), rasterHeight(240),
-	offset(0)
+	textureWidth(0), textureHeight(0), buffer(0), rasterWidth(326), rasterHeight(240),
+	offset(0), hideMouseTimeout(60)
 {
 	// Screen pitch has to be the texture width (in 32-bit pixels)...
 	JaguarSetScreenPitch(1024);
+	setMouseTracking(true);
 }
 
 
@@ -53,13 +54,15 @@ void GLWidget::initializeGL()
 	glEnable(GL_DITHER);
 	glEnable(GL_TEXTURE_2D);
 	glClearColor(0.0, 0.0, 0.0, 0.0);
+
+	CreateTextures();
 }
 
 
 void GLWidget::paintGL()
 {
-//kludge
-rasterHeight = (vjs.hardwareTypeNTSC ? VIRTUAL_SCREEN_HEIGHT_NTSC : VIRTUAL_SCREEN_HEIGHT_PAL);
+//kludge [NO MORE!]
+//rasterHeight = (vjs.hardwareTypeNTSC ? VIRTUAL_SCREEN_HEIGHT_NTSC : VIRTUAL_SCREEN_HEIGHT_PAL);
 
 	// If we're in fullscreen mode, we take the value of the screen width as
 	// set by MainWin, since it may be wider than what our aspect ratio allows.
@@ -111,36 +114,69 @@ rasterHeight = (vjs.hardwareTypeNTSC ? VIRTUAL_SCREEN_HEIGHT_NTSC : VIRTUAL_SCRE
 }
 
 
-void GLWidget::resizeGL(int width, int height)
+void GLWidget::resizeGL(int /*width*/, int /*height*/)
 {
-	if (width > textureWidth || height > textureHeight)
+//kludge [No, this is where it belongs!]
+	rasterHeight = (vjs.hardwareTypeNTSC ? VIRTUAL_SCREEN_HEIGHT_NTSC : VIRTUAL_SCREEN_HEIGHT_PAL);
+
+	return;
+}
+
+
+// At some point, we'll have to create more than one texture to handle
+// cases like Doom. Or have another go at TV type rendering; it will
+// require a 2048x512 texture though. (Note that 512 is the correct height for
+// interlaced screens; we won't have to change much here to support it.)
+void GLWidget::CreateTextures(void)
+{
+	// Seems that power of 2 sizes are still mandatory...
+	textureWidth  = 1024;
+	textureHeight = 512;
+	buffer = new uint32_t[textureWidth * textureHeight];
+	JaguarSetScreenBuffer(buffer);
+
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, textureWidth);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, textureWidth, textureHeight, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, NULL);
+}
+
+
+void GLWidget::HandleMouseHiding(void)
+{
+	// Mouse watchdog timer handling. Basically, if the timeout value is
+	// greater than zero, decrement it. Otherwise, check for zero, if so, then
+	// hide the mouse and set the hideMouseTimeout value to -1 to signal that
+	// the mouse has been hidden.
+	if (hideMouseTimeout > 0)
+		hideMouseTimeout--;
+	else if (hideMouseTimeout == 0)
 	{
-		// Seems that power of 2 sizes are still mandatory...
-		textureWidth  = 1024;
-		textureHeight = 512;
-#if 0
-printf("Resizing: new texture width/height = %i x %i\n", textureWidth, textureHeight);
-printf("Resizing: new raster width/height = %i x %i\n", rasterWidth, rasterHeight);
-#endif
-
-		if (buffer)
-		{
-			delete[] buffer;
-			glDeleteTextures(1, &texture);
-		}
-
-		buffer = new uint32_t[textureWidth * textureHeight];
-		JaguarSetScreenBuffer(buffer);
-
-//???
-memset(buffer, 0xFF, textureWidth * textureHeight * sizeof(uint32_t));
-		glGenTextures(1, &texture);
-		glBindTexture(GL_TEXTURE_2D, texture);
-		glPixelStorei(GL_UNPACK_ROW_LENGTH, textureWidth);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, textureWidth, textureHeight, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, NULL);
+		hideMouseTimeout--;
+		setCursor(Qt::BlankCursor);
 	}
+}
+
+
+// We use this as part of a watchdog system for hiding/unhiding the mouse. This
+// part shows the mouse (if hidden) and resets the watchdog timer.
+void GLWidget::CheckAndRestoreMouseCursor(void)
+{
+	// Has the mouse been hidden? (-1 means mouse was hidden)
+	if (hideMouseTimeout == -1)
+		setCursor(Qt::ArrowCursor);
+
+	hideMouseTimeout = 60;
+}
+
+
+// We check here for mouse movement; if there is any, show the mouse and reset
+// the watchdog timer.
+void GLWidget::mouseMoveEvent(QMouseEvent * /*event*/)
+{
+	CheckAndRestoreMouseCursor();
 }
 
 
