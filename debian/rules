@@ -7,9 +7,9 @@
 # build the jaguar core and m68k libraries first,
 # then build the actual emulator
 override_dh_auto_build:
-	make -f jaguarcore.mak
-	make -C src/m68000
-	dh_auto_build
+	make -f jaguarcore.mak V=1
+	make -C src/m68000 V=1
+	dh_auto_build -- V=1
 
 # install docs/WHATSNEW as changelog.gz (Debian Policy 12.7)
 override_dh_installchangelogs:
