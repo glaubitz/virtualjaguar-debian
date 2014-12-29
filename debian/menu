@@ -1,3 +1,2 @@
 ?package(virtualjaguar):needs="X11" section="Applications/Emulators"\
-  title="virtualjaguar" command="/usr/bin/virtualjaguar" \
-  icon="/usr/share/pixmaps/vj.xpm"
+  title="virtualjaguar" command="/usr/bin/virtualjaguar"
