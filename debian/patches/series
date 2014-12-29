@@ -1,3 +1,2 @@
 10-add-version-file.patch
 20-fix-linker-paths.patch
-30-use-xdg-data-dir.patch
