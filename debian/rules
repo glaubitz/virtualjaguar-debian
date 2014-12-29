@@ -11,6 +11,11 @@ override_dh_auto_build:
 	make -C src/m68000 V=1
 	dh_auto_build -- V=1
 
+# Convert icon to 32x32 for menu
+	xpmtoppm res/vj.xpm | \
+	pnmscale -xsize 32 -ysize 32 | \
+	ppmtoxpm -name vj_xpm-32x32 > debian/vj-32x32.xpm
+
 # install docs/WHATSNEW as changelog.gz (Debian Policy 12.7)
 override_dh_installchangelogs:
 	dh_installchangelogs docs/WHATSNEW

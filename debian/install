@@ -1,3 +1,4 @@
 virtualjaguar usr/bin
 debian/virtualjaguar.desktop usr/share/applications
 res/vj.xpm usr/share/pixmaps
+debian/vj-32x32.xpm usr/share/pixmaps
