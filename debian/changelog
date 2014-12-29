@@ -1,3 +1,10 @@
+virtualjaguar (2.1.2-2) unstable; urgency=medium
+
+  * Update VJ_RELEASE_VERSION in debian/patches/
+    10-add-version-file.patch to 2.1.2.
+
+ -- John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>  Mon, 29 Dec 2014 16:12:44 +0100
+
 virtualjaguar (2.1.2-1) unstable; urgency=medium
 
   * New upstream release.
