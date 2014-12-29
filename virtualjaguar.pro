@@ -54,9 +54,9 @@ QMAKE_CXXFLAGS += `$(CROSS)sdl-config --cflags`
 
 # Translations. NB: Nobody has stepped up to do any :-P so these are dummy
 # translations
-TRANSLATIONS = \
-	virtualjaguar_fr.ts \
-	virtualjaguar_gr.ts
+#TRANSLATIONS = \
+#	virtualjaguar_fr.ts \
+#	virtualjaguar_gr.ts
 
 INCLUDEPATH += \
 	src \
