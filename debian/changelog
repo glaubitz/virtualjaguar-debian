@@ -1,3 +1,12 @@
+virtualjaguar (2.1.2-3) unstable; urgency=medium
+
+  * Add patch to fix sign declarations of multiple arrays. (Closes: #811775)
+  * Update years in debian/copyright.
+  * Drop debian/menu file in compliance with CTTE decision (see #741573).
+  * Update standards version to 3.9.8 in debian/control.
+
+ -- John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>  Sun, 15 May 2016 15:16:44 +0200
+
 virtualjaguar (2.1.2-2) unstable; urgency=medium
 
   * Update VJ_RELEASE_VERSION in debian/patches/
