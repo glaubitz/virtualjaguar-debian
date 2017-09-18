@@ -154,6 +154,7 @@
 #include "jerry.h"
 
 #include <string.h>								// For memcpy
+#include <stdlib.h>								// For rand()
 //#include <math.h>
 #include "cdrom.h"
 #include "dac.h"
@@ -164,6 +165,7 @@
 #include "joystick.h"
 #include "log.h"
 #include "m68000/m68kinterface.h"
+#include "memtrack.h"
 #include "settings.h"
 #include "tom.h"
 //#include "memory.h"
@@ -300,9 +302,9 @@ void JERRYI2SCallback(void)
 {
 	// We don't have to divide the RISC clock rate by this--the reason is a bit
 	// convoluted. Will put explanation here later...
-// What's needed here is to find the ratio of the frequency to the number of clock cycles
-// in one second. For example, if the sample rate is 44100, we divide the clock rate by
-// this: 26590906 / 44100 = 602 cycles.
+// What's needed here is to find the ratio of the frequency to the number of
+// clock cycles  in one second. For example, if the sample rate is 44100, we
+// divide the clock rate by this: 26590906 / 44100 = 602 cycles.
 // Which means, every 602 cycles that go by we have to generate an interrupt.
 	jerryI2SCycles = 32 * (2 * (sclk + 1));
 //This makes audio faster, but not enough and the pitch is wrong besides
@@ -320,16 +322,18 @@ void JERRYI2SCallback(void)
 	}
 	else
 	{
+// This is handled in the BUTCH handler, where it should be...
+#if 0
 		// JERRY is slave to external word clock
 
 //Note that 44100 Hz requires samples every 22.675737 usec.
-//When JERRY is slave to the word clock, we need to do interrupts either at 44.1K
-//sample rate or at a 88.2K sample rate (11.332... usec).
+//When JERRY is slave to the word clock, we need to do interrupts either at
+//44.1K sample rate or at a 88.2K sample rate (11.332... usec).
 /*		// This is just a temporary kludge to see if the CD bus mastering works
 		// I.e., this is totally faked...!
 // The whole interrupt system is pretty much borked and is need of an overhaul.
-// What we need is a way of handling these interrupts when they happen instead of
-// scanline boundaries the way it is now.
+// What we need is a way of handling these interrupts when they happen instead
+// of scanline boundaries the way it is now.
 		jerry_i2s_interrupt_timer -= cycles;
 		if (jerry_i2s_interrupt_timer <= 0)
 		{
@@ -351,6 +355,7 @@ void JERRYI2SCallback(void)
 		}
 
 		SetCallbackTime(JERRYI2SCallback, 22.675737, EVENT_JERRY);
+#endif
 	}
 }
 
@@ -358,6 +363,7 @@ void JERRYI2SCallback(void)
 void JERRYInit(void)
 {
 	JoystickInit();
+	MTInit();
 	memcpy(&jerry_ram_8[0xD000], waveTableROM, 0x1000);
 
 	JERRYPIT1Prescaler = 0xFFFF;
@@ -375,6 +381,7 @@ void JERRYReset(void)
 {
 	JoystickReset();
 	EepromReset();
+	MTReset();
 	JERRYResetI2S();
 
 	memset(jerry_ram_8, 0x00, 0xD000);		// Don't clear out the Wavetable ROM...!
@@ -398,6 +405,7 @@ void JERRYDone(void)
 	JoystickDone();
 	DACDone();
 	EepromDone();
+	MTDone();
 }
 
 
@@ -522,6 +530,8 @@ uint16_t JERRYReadWord(uint32_t offset, uint32_t who/*=UNKNOWN*/)
 	else if ((offset >= 0xF10036) && (offset <= 0xF1003D))
 	{
 WriteLog("JERRY: Unhandled timer read (WORD) at %08X...\n", offset);
+//temp kluge, for now...
+return rand() & 0xFFFF;
 	}
 //	else if ((offset >= 0xF10010) && (offset <= 0xF10015))
 //		return clock_word_read(offset);

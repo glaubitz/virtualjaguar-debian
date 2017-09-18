@@ -48,7 +48,7 @@ uint32_t JaguarLoadROM(uint8_t * &rom, char * path)
 #warning "!!! FIX !!! Should have sanity checking for ROM size to prevent buffer overflow!"
 	uint32_t romSize = 0;
 
-	WriteLog("JaguarLoadROM: Attempting to load file '%s'...", path);
+	WriteLog("FILE: JaguarLoadROM attempting to load file '%s'...", path);
 	char * ext = strrchr(path, '.');
 
 	// No filename extension == YUO FAIL IT (it is loading the file).
@@ -60,8 +60,8 @@ uint32_t JaguarLoadROM(uint8_t * &rom, char * path)
 		return 0;
 	}
 
-	WriteLog("Succeeded in finding extension (%s)!\n", ext);
-	WriteLog("VJ: Loading \"%s\"...", path);
+	WriteLog("\nFILE: Succeeded in finding extension (%s)!\n", ext);
+	WriteLog("FILE: Loading \"%s\"...", path);
 
 	if (strcasecmp(ext, ".zip") == 0)
 	{
@@ -277,7 +277,7 @@ bool AlpineLoadFile(char * path)
 	}
 
 	jaguarMainROMCRC32 = crc32_calcCheckSum(buffer, jaguarROMSize);
-	WriteLog("CRC: %08X\n", (unsigned int)jaguarMainROMCRC32);
+	WriteLog("FILE: CRC is %08X\n", (unsigned int)jaguarMainROMCRC32);
 	EepromInit();
 
 	jaguarRunAddress = 0x802000;
@@ -347,13 +347,13 @@ static bool CheckExtension(const uint8_t * filename, const char * ext)
 //
 // Get file from .ZIP
 // Returns the size of the file inside the .ZIP file that we're looking at
-// NOTE: If the thing we're looking for is found, it allocates it in the passed in buffer.
-//       Which means we have to deallocate it later.
+// NOTE: If the thing we're looking for is found, it allocates it in the passed
+//       in buffer. Which means we have to deallocate it later.
 //
 uint32_t GetFileFromZIP(const char * zipFile, FileType type, uint8_t * &buffer)
 {
-// NOTE: We could easily check for this by discarding anything that's larger than the RAM/ROM
-//       size of the Jaguar console.
+// NOTE: We could easily check for this by discarding anything that's larger
+//       than the RAM/ROM size of the Jaguar console.
 #warning "!!! FIX !!! Should have sanity checking for ROM size to prevent buffer overflow!"
 	const char ftStrings[5][32] = { "Software", "EEPROM", "Label", "Box Art", "Controller Overlay" };
 //	ZIP * zip = openzip(0, 0, zipFile);
@@ -369,16 +369,18 @@ uint32_t GetFileFromZIP(const char * zipFile, FileType type, uint8_t * &buffer)
 	ZipFileEntry ze;
 	bool found = false;
 
-	// The order is here is important: If the file is found, we need to short-circuit the
-	// readzip() call because otherwise, 'ze' will be pointing to the wrong file!
+	// The order is here is important: If the file is found, we need to short-
+	// circuit the readzip() call because otherwise, 'ze' will be pointing to
+	// the wrong file!
 //	while (!found && readzip(zip))
 	while (!found && GetZIPHeader(zip, ze))
 	{
 //		ze = &zip->ent;
 
-		// Here we simply rely on the file extension to tell the truth, but we know
-		// that extensions lie like sons-a-bitches. So this is naive, we need to do
-		// something a little more robust to keep bad things from happening here.
+		// Here we simply rely on the file extension to tell the truth, but we
+		// know that extensions lie like sons-a-bitches. So this is naive, we
+		// need to do something a little more robust to keep bad things from
+		// happening here.
 #warning "!!! Checking for image by extension can be fooled !!!"
 		if ((type == FT_LABEL) && (CheckExtension(ze.filename, ".png") || CheckExtension(ze.filename, ".jpg") || CheckExtension(ze.filename, ".gif")))
 		{

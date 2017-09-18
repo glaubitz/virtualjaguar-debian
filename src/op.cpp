@@ -9,7 +9,7 @@
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  -----------------------------------------------------------
 // JLH  01/16/2010  Created this log ;-)
 //
 
@@ -230,9 +230,12 @@ void OPDiscoverObjects(uint32_t address)
 
 		if (objectType == 3)
 		{
-			// Recursion needed to follow all links! This does depth-first recursion
-			// on the not-taken objects
-			OPDiscoverObjects(address + 8);
+			// Branch if YPOS < 2047 (or YPOS > 0) can be treated as a GOTO, so
+			// don't do any discovery in that case. Otherwise, have at it:
+			if (((lo & 0xFFFF) != 0x7FFB) && ((lo & 0xFFFF) != 0x8003))
+				// Recursion needed to follow all links! This does depth-first
+				// recursion on the not-taken objects
+				OPDiscoverObjects(address + 8);
 		}
 
 		// Get the next object...
@@ -252,7 +255,7 @@ void OPDumpObjectList(void)
 		uint32_t lo = JaguarReadLong(address + 4, OP);
 		uint8_t objectType = lo & 0x07;
 		uint32_t link = ((hi << 11) | (lo >> 21)) & 0x3FFFF8;
-		WriteLog("%08X: %08X %08X %s -> $08X", address, hi, lo, opType[objectType], link);
+		WriteLog("%08X: %08X %08X %s -> $%08X", address, hi, lo, opType[objectType], link);
 
 		if (objectType == 3)
 		{
@@ -263,12 +266,15 @@ void OPDumpObjectList(void)
 
 		WriteLog("\n");
 
+		// Yes, this is how the OP finds follow-on phrases for bitmap/scaled
+		// bitmap objects...!
 		if (objectType == 0)
-			DumpFixedObject(OPLoadPhrase(address + 0), OPLoadPhrase(address + 8));
+			DumpFixedObject(OPLoadPhrase(address + 0),
+				OPLoadPhrase(address | 0x08));
 
 		if (objectType == 1)
-			DumpScaledObject(OPLoadPhrase(address + 0), OPLoadPhrase(address + 8),
-				OPLoadPhrase(address + 16));
+			DumpScaledObject(OPLoadPhrase(address + 0),
+				OPLoadPhrase(address | 0x08), OPLoadPhrase(address | 0x10));
 
 		if (address == link)	// Ruh roh...
 		{
@@ -442,12 +448,16 @@ void DumpBitmapCore(uint64_t p0, uint64_t p1)
 void OPProcessList(int halfline, bool render)
 {
 #warning "!!! NEED TO HANDLE MULTIPLE FIELDS PROPERLY !!!"
-// We ignore them, for now; not good
+// We ignore them, for now; not good D-:
+// N.B.: Half-lines are exactly that, half-lines. When in interlaced mode, it
+//       draws the screen exactly the same way as it does in non, one line at a
+//       time. The only way you know you're in field #2 is that the topmost bit
+//       of VC is set. Half-line mode is so you can draw higher horizontal
+//       resolutions than you normally could, as the line buffer is only 720
+//       pixels wide...
 	halfline &= 0x7FF;
 
 extern int op_start_log;
-//	char * condition_to_str[8] =
-//		{ "==", "<", ">", "(opflag set)", "(second half line)", "?", "?", "?" };
 
 	op_pointer = OPGetListPointer();
 
@@ -558,14 +568,13 @@ WriteLog("    --> List end\n\n");
 		{
 		case OBJECT_TYPE_BITMAP:
 		{
-//WAS:			uint16_t ypos = (p0 >> 3) & 0x3FF;
 			uint16_t ypos = (p0 >> 3) & 0x7FF;
 // This is only theory implied by Rayman...!
-// It seems that if the YPOS is zero, then bump the YPOS value so that it coincides with
-// the VDB value. With interlacing, this would be slightly more tricky.
-// There's probably another bit somewhere that enables this mode--but so far, doesn't seem
-// to affect any other game in a negative way (that I've seen).
-// Either that, or it's an undocumented bug...
+// It seems that if the YPOS is zero, then bump the YPOS value so that it
+// coincides with the VDB value. With interlacing, this would be slightly more
+// tricky. There's probably another bit somewhere that enables this mode--but
+// so far, doesn't seem to affect any other game in a negative way (that I've
+// seen). Either that, or it's an undocumented bug...
 
 //No, the reason this was needed is that the OP code before was wrong. Any value
 //less than VDB will get written to the top line of the display!
@@ -575,9 +584,9 @@ WriteLog("    --> List end\n\n");
 			if (ypos == 0)
 				ypos = TOMReadWord(0xF00046, OP) / 2;			// Get the VDB value
 #endif
-// Actually, no. Any item less than VDB will get only the lines that hang over VDB displayed.
-// Actually, this is incorrect. It seems that VDB value is wrong somewhere and that's
-// what's causing things to fuck up. Still no idea why.
+// Actually, no. Any item less than VDB will get only the lines that hang over
+// VDB displayed. Actually, this is incorrect. It seems that VDB value is wrong
+// somewhere and that's what's causing things to fuck up. Still no idea why.
 
 			uint32_t height = (p0 & 0xFFC000) >> 14;
 			uint32_t oldOPP = op_pointer - 8;
@@ -589,8 +598,10 @@ if (!inhibit)	// For OP testing only!
 // *** END OP PROCESSOR TESTING ONLY ***
 			if (halfline >= ypos && height > 0)
 			{
-				uint64_t p1 = OPLoadPhrase(op_pointer);
-				op_pointer += 8;
+				// Believe it or not, this is what the OP actually does...
+				// which is why they're required to be on a dphrase boundary!
+				uint64_t p1 = OPLoadPhrase(oldOPP | 0x08);
+//unneeded				op_pointer += 8;
 //WriteLog("OP: Writing halfline %d with ypos == %d...\n", halfline, ypos);
 //WriteLog("--> Writing %u BPP bitmap...\n", op_bitmap_bit_depth[(p1 >> 12) & 0x07]);
 //				OPProcessFixedBitmap(halfline, p0, p1, render);
@@ -598,17 +609,6 @@ if (!inhibit)	// For OP testing only!
 
 				// OP write-backs
 
-//???Does this really happen??? Doesn't seem to work if you do this...!
-//Probably not. Must be a bug in the documentation...!
-//				uint32_t link = (p0 & 0x7FFFF000000) >> 21;
-//				SET16(tom_ram_8, 0x20, link & 0xFFFF);	// OLP
-//				SET16(tom_ram_8, 0x22, link >> 16);
-/*				uint32_t height = (p0 & 0xFFC000) >> 14;
-				if (height - 1 > 0)
-					height--;*/
-				// NOTE: Would subtract 2 if in interlaced mode...!
-//				uint64_t height = ((p0 & 0xFFC000) - 0x4000) & 0xFFC000;
-//				if (height)
 				height--;
 
 				uint64_t data = (p0 & 0xFFFFF80000000000LL) >> 40;
@@ -620,24 +620,16 @@ if (!inhibit)	// For OP testing only!
 				p0 |= data << 40;
 				OPStorePhrase(oldOPP, p0);
 			}
-//WriteLog("\t\tOld OP: %08X -> ", op_pointer);
-//Temp, for testing...
-//No doubt, this type of check will break all kinds of stuff... !!! FIX !!!
-//And it does! !!! FIX !!!
-//Let's remove this "fix" since it screws up more than it fixes.
-/*	if (op_pointer > ((p0 & 0x000007FFFF000000LL) >> 21))
-		return;*/
 
-// NOTE: The link address only replaces bits 3-21 in the OLP, and this replaces
-//       EVERYTHING. !!! FIX !!! [DONE]
-#warning "!!! Link address is not linked properly for all object types !!!"
-#warning "!!! Only BITMAP is properly handled !!!"
-			op_pointer &= 0xFFC00007;
-			op_pointer |= (p0 & 0x000007FFFF000000LL) >> 21;
-//WriteLog("New OP: %08X\n", op_pointer);
-//kludge: Seems that memory access is mirrored in the first 8MB of memory...
-if (op_pointer > 0x1FFFFF && op_pointer < 0x800000)
-	op_pointer &= 0xFF1FFFFF;	// Knock out bits 21-23
+			// OP bottom 3 bits are hardwired to zero. The link address
+			// reflects this, so we only need the top 19 bits of the address
+			// (which is why we only shift 21, and not 24).
+			op_pointer = (p0 & 0x000007FFFF000000LL) >> 21;
+
+			// KLUDGE: Seems that memory access is mirrored in the first 8MB of
+			// memory...
+			if (op_pointer > 0x1FFFFF && op_pointer < 0x800000)
+				op_pointer &= 0xFF1FFFFF;	// Knock out bits 21-23
 
 			break;
 		}
@@ -659,11 +651,11 @@ if (!inhibit)	// For OP testing only!
 // *** END OP PROCESSOR TESTING ONLY ***
 			if (halfline >= ypos && height > 0)
 			{
-				uint64_t p1 = OPLoadPhrase(op_pointer);
-				op_pointer += 8;
-				uint64_t p2 = OPLoadPhrase(op_pointer);
-				op_pointer += 8;
-//WriteLog("OP: %08X (%d) %08X%08X %08X%08X %08X%08X\n", oldOPP, halfline, (uint32_t)(p0>>32), (uint32_t)(p0&0xFFFFFFFF), (uint32_t)(p1>>32), (uint32_t)(p1&0xFFFFFFFF), (uint32_t)(p2>>32), (uint32_t)(p2&0xFFFFFFFF));
+				// Believe it or not, this is what the OP actually does...
+				// which is why they're required to be on a qphrase boundary!
+				uint64_t p1 = OPLoadPhrase(oldOPP | 0x08);
+				uint64_t p2 = OPLoadPhrase(oldOPP | 0x10);
+//unneeded				op_pointer += 16;
 				OPProcessScaledBitmap(p0, p1, p2, render);
 
 				// OP write-backs
@@ -716,9 +708,10 @@ OP: Scaled bitmap 4x? 4bpp at 34,? hscale=80 fpix=0 data=000756E8 pitch 1 hflipp
 */
 //Here's another problem:
 //    [hsc: 20, vsc: 20, rem: 00]
-// Since we're not checking for $E0 (but that's what we get from the above), we end
-// up repeating this halfline unnecessarily... !!! FIX !!! [DONE, but... still not quite
-// right. Either that, or the Accolade team that wrote Bubsy screwed up royal.]
+// Since we're not checking for $E0 (but that's what we get from the above), we
+// end up repeating this halfline unnecessarily... !!! FIX !!! [DONE, but...
+// still not quite right. Either that, or the Accolade team that wrote Bubsy
+// screwed up royal.]
 //Also note: $E0 = 7.0 which IS a legal vscale value...
 
 //				if (remainder & 0x80)				// I.e., it's negative
@@ -769,7 +762,16 @@ OP: Scaled bitmap 4x? 4bpp at 34,? hscale=80 fpix=0 data=000756E8 pitch 1 hflipp
 //WriteLog(" [after]: rem=%02X, vscale=%02X\n", remainder, vscale);
 			}
 
+			// OP bottom 3 bits are hardwired to zero. The link address
+			// reflects this, so we only need the top 19 bits of the address
+			// (which is why we only shift 21, and not 24).
 			op_pointer = (p0 & 0x000007FFFF000000LL) >> 21;
+
+			// KLUDGE: Seems that memory access is mirrored in the first 8MB of
+			// memory...
+			if (op_pointer > 0x1FFFFF && op_pointer < 0x800000)
+				op_pointer &= 0xFF1FFFFF;	// Knock out bits 21-23
+
 			break;
 		}
 		case OBJECT_TYPE_GPU:
@@ -790,27 +792,22 @@ OP: Scaled bitmap 4x? 4bpp at 34,? hscale=80 fpix=0 data=000756E8 pitch 1 hflipp
 		case OBJECT_TYPE_BRANCH:
 		{
 			uint16_t ypos = (p0 >> 3) & 0x7FF;
-// NOTE: The JTRM sez there are only 2 bits used for the CC, but lists *five*
-//       conditions! Need at least one more bit for that! :-P
-// Also, the ASIC nets imply that it uses bits 14-16 (height in BM & SBM objects)
-#warning "!!! Possibly bad CC handling in OP (missing 1 bit) !!!"
-			uint8_t  cc   = (p0 >> 14) & 0x03;
+			// JTRM is wrong: CC is bits 14-16 (3 bits, *not* 2)
+			uint8_t  cc   = (p0 >> 14) & 0x07;
 			uint32_t link = (p0 >> 21) & 0x3FFFF8;
 
-//			if ((ypos!=507)&&(ypos!=25))
-//				WriteLog("\t%i%s%i link=0x%.8x\n",halfline,condition_to_str[cc],ypos>>1,link);
 			switch (cc)
 			{
 			case CONDITION_EQUAL:
-				if (TOMReadWord(0xF00006, OP) == ypos || ypos == 0x7FF)
+				if (halfline == ypos || ypos == 0x7FF)
 					op_pointer = link;
 				break;
 			case CONDITION_LESS_THAN:
-				if (TOMReadWord(0xF00006, OP) < ypos)
+				if (halfline < ypos)
 					op_pointer = link;
 				break;
 			case CONDITION_GREATER_THAN:
-				if (TOMReadWord(0xF00006, OP) > ypos)
+				if (halfline > ypos)
 					op_pointer = link;
 				break;
 			case CONDITION_OP_FLAG_SET:
@@ -818,15 +815,9 @@ OP: Scaled bitmap 4x? 4bpp at 34,? hscale=80 fpix=0 data=000756E8 pitch 1 hflipp
 					op_pointer = link;
 				break;
 			case CONDITION_SECOND_HALF_LINE:
-//Here's the ASIC code:
-//  ND4(cctrue5, newheight[2], heightl[1], heightl[0], hcb[10]);
-//which means, do the link if bit 10 of HC is set...
-
-				// This basically means branch if bit 10 of HC is set
-#warning "Unhandled condition code causes emulator to crash... !!! FIX !!!"
-				WriteLog("OP: Unexpected CONDITION_SECOND_HALF_LINE in BRANCH object\nOP: shutting down!\n");
-				LogDone();
-				exit(0);
+				// Branch if bit 10 of HC is set...
+				if (TOMGetHC() & 0x0400)
+					op_pointer = link;
 				break;
 			default:
 				// Basically, if you do this, the OP does nothing. :-)
@@ -836,35 +827,25 @@ OP: Scaled bitmap 4x? 4bpp at 34,? hscale=80 fpix=0 data=000756E8 pitch 1 hflipp
 		}
 		case OBJECT_TYPE_STOP:
 		{
-//op_start_log = 0;
-			// unsure
-//WriteLog("OP: --> STOP\n");
-//			op_set_status_register(((p0>>3) & 0xFFFFFFFF));
-//This seems more likely...
 			OPSetCurrentObject(p0);
 
-			if (p0 & 0x08)
+			if ((p0 & 0x08) && TOMIRQEnabled(IRQ_OPFLAG))
 			{
-				// We need to check whether these interrupts are enabled or not, THEN
-				// set an IRQ + pending flag if necessary...
-				if (TOMIRQEnabled(IRQ_OPFLAG))
-				{
-					TOMSetPendingObjectInt();
-					m68k_set_irq(2);				// Cause a 68K IPL 2 to occur...
-				}
+				TOMSetPendingObjectInt();
+				m68k_set_irq(2);		// Cause a 68K IPL 2 to occur...
 			}
 
+			// Bail out, we're done...
 			return;
-//			break;
 		}
 		default:
-//			WriteLog("op: unknown object type %i\n", ((uint8_t)p0 & 0x07));
-			return;
+			WriteLog("OP: Unknown object type %i\n", (uint8_t)p0 & 0x07);
 		}
 
-		// Here is a little sanity check to keep the OP from locking up the machine
-		// when fed bad data. Better would be to count how many actual cycles it used
-		// and bail out/reenter to properly simulate an overloaded OP... !!! FIX !!!
+		// Here is a little sanity check to keep the OP from locking up the
+		// machine when fed bad data. Better would be to count how many actual
+		// cycles it used and bail out/reenter to properly simulate an
+		// overloaded OP... !!! FIX !!!
 #warning "Better would be to count how many actual cycles it used and bail out/reenter to properly simulate an overloaded OP... !!! FIX !!!"
 		opCyclesToRun--;
 
@@ -881,56 +862,59 @@ void OPProcessFixedBitmap(uint64_t p0, uint64_t p1, bool render)
 {
 // Need to make sure that when writing that it stays within the line buffer...
 // LBUF ($F01800 - $F01D9E) 360 x 32-bit RAM
-	uint8_t depth = (p1 >> 12) & 0x07;				// Color depth of image
+	uint8_t depth = (p1 >> 12) & 0x07;		// Color depth of image
 	int32_t xpos = ((int16_t)((p1 << 4) & 0xFFFF)) >> 4;// Image xpos in LBUF
-	uint32_t iwidth = (p1 >> 28) & 0x3FF;				// Image width in *phrases*
-	uint32_t data = (p0 >> 40) & 0xFFFFF8;			// Pixel data address
-//#ifdef OP_DEBUG_BMP
+	uint32_t iwidth = (p1 >> 28) & 0x3FF;	// Image width in *phrases*
+	uint32_t data = (p0 >> 40) & 0xFFFFF8;	// Pixel data address
 	uint32_t firstPix = (p1 >> 49) & 0x3F;
 	// "The LSB is significant only for scaled objects..." -JTRM
-	// "In 1 BPP mode, all five bits are significant. In 2 BPP mode, the top four are significant..."
+	// "In 1 BPP mode, all five bits are significant. In 2 BPP mode, the top
+	//  four are significant..."
 	firstPix &= 0x3E;
-//#endif
+
 // We can ignore the RELEASE (high order) bit for now--probably forever...!
 //	uint8_t flags = (p1 >> 45) & 0x0F;	// REFLECT, RMW, TRANS, RELEASE
 //Optimize: break these out to their own BOOL values
-	uint8_t flags = (p1 >> 45) & 0x07;				// REFLECT (0), RMW (1), TRANS (2)
+	uint8_t flags = (p1 >> 45) & 0x07;		// REFLECT (0), RMW (1), TRANS (2)
 	bool flagREFLECT = (flags & OPFLAG_REFLECT ? true : false),
 		flagRMW = (flags & OPFLAG_RMW ? true : false),
 		flagTRANS = (flags & OPFLAG_TRANS ? true : false);
 // "For images with 1 to 4 bits/pixel the top 7 to 4 bits of the index
 //  provide the most significant bits of the palette address."
-	uint8_t index = (p1 >> 37) & 0xFE;				// CLUT index offset (upper pix, 1-4 bpp)
-	uint32_t pitch = (p1 >> 15) & 0x07;				// Phrase pitch
-	pitch <<= 3;									// Optimization: Multiply pitch by 8
+	uint8_t index = (p1 >> 37) & 0xFE;		// CLUT index offset (upper pix, 1-4 bpp)
+	uint32_t pitch = (p1 >> 15) & 0x07;		// Phrase pitch
+	pitch <<= 3;							// Optimization: Multiply pitch by 8
 
 //	int16_t scanlineWidth = tom_getVideoModeWidth();
 	uint8_t * tomRam8 = TOMGetRamPointer();
 	uint8_t * paletteRAM = &tomRam8[0x400];
-	// This is OK as long as it's used correctly: For 16-bit RAM to RAM direct copies--NOT
-	// for use when using endian-corrected data (i.e., any of the *_word_read functions!)
+	// This is OK as long as it's used correctly: For 16-bit RAM to RAM direct
+	// copies--NOT for use when using endian-corrected data (i.e., any of the
+	// *_word_read functions!)
 	uint16_t * paletteRAM16 = (uint16_t *)paletteRAM;
 
 //	WriteLog("bitmap %ix? %ibpp at %i,? firstpix=? data=0x%.8x pitch %i hflipped=%s dwidth=? (linked to ?) RMW=%s Tranparent=%s\n",
 //		iwidth, op_bitmap_bit_depth[bitdepth], xpos, ptr, pitch, (flags&OPFLAG_REFLECT ? "yes" : "no"), (flags&OPFLAG_RMW ? "yes" : "no"), (flags&OPFLAG_TRANS ? "yes" : "no"));
 
 // Is it OK to have a 0 for the data width??? (i.e., undocumented?)
-// Seems to be... Seems that dwidth *can* be zero (i.e., reuse same line) as well.
+// Seems to be... Seems that dwidth *can* be zero (i.e., reuse same line) as
+// well.
 // Pitch == 0 is OK too...
 
-//kludge: Seems that the OP treats iwidth == 0 as iwidth == 1... Need to investigate
-//        on real hardware...
+//kludge: Seems that the OP treats iwidth == 0 as iwidth == 1... Need to
+//        investigate on real hardware...
 #warning "!!! Need to investigate iwidth == 0 behavior on real hardware !!!"
 if (iwidth == 0)
 	iwidth = 1;
 
 //	if (!render || op_pointer == 0 || ptr == 0 || pitch == 0)
-//I'm not convinced that we need to concern ourselves with data & op_pointer here either!
+//I'm not convinced that we need to concern ourselves with data & op_pointer
+//here either!
 	if (!render || iwidth == 0)
 		return;
 
-//OK, so we know the position in the line buffer is correct. It's the clipping in
-//24bpp mode that's wrong!
+//OK, so we know the position in the line buffer is correct. It's the clipping
+//in 24bpp mode that's wrong!
 #if 0
 //This is a total kludge, based upon the fact that 24BPP mode puts *4* bytes
 //into the line buffer for each pixel.
@@ -950,17 +934,12 @@ if (depth == 5)	// i.e., 24bpp mode...
 		: -((phraseWidthToPixels[depth] * iwidth) + 1));
 	uint32_t clippedWidth = 0, phraseClippedWidth = 0, dataClippedWidth = 0;//, phrasePixel = 0;
 	bool in24BPPMode = (((GET16(tomRam8, 0x0028) >> 1) & 0x03) == 1 ? true : false);	// VMODE
-	// Not sure if this is Jaguar Two only location or what...
-	// From the docs, it is... If we want to limit here we should think of something else.
-//	int32_t limit = GET16(tom_ram_8, 0x0008);			// LIMIT
-//	int32_t limit = 720;
-//	int32_t lbufWidth = (!in24BPPMode ? limit - 1 : (limit / 2) - 1);	// Zero based limit...
-//printf("[OP:xpos=%i,spos=%i,epos=%i>", xpos, startPos, endPos);
 	// This is correct, the OP line buffer is a constant size... 
 	int32_t limit = 720;
 	int32_t lbufWidth = 719;
 
-	// If the image is completely to the left or right of the line buffer, then bail.
+	// If the image is completely to the left or right of the line buffer, then
+	// bail.
 //If in REFLECT mode, then these values are swapped! !!! FIX !!! [DONE]
 //There are four possibilities:
 //  1. image sits on left edge and no REFLECT; starts out of bounds but ends in bounds.
@@ -1016,7 +995,8 @@ if (depth == 5)	// i.e., 24bpp mode...
 if (depth > 5)
 	WriteLog("OP: We're about to encounter a divide by zero error!\n");
 	// NOTE: We're just using endPos to figure out how much, if any, to clip by.
-	// ALSO: There may be another case where we start out of bounds and end out of bounds...!
+	// ALSO: There may be another case where we start out of bounds and end out
+	// of bounds...!
 	// !!! FIX !!!
 	if (startPos < 0)			// Case #1: Begin out, end in, L to R
 		clippedWidth = 0 - startPos,
@@ -1273,11 +1253,12 @@ if (firstPix)
 			for(int i=0; i<4; i++)
 			{
 				uint8_t bitsHi = pixels >> 56, bitsLo = pixels >> 48;
-// Seems to me that both of these are in the same endian, so we could cast it as
-// uint16_t * and do straight across copies (what about 24 bpp? Treat it differently...)
-// This only works for the palettized modes (1 - 8 BPP), since we actually have to
-// copy data from memory in 16 BPP mode (or does it? Isn't this the same as the CLUT case?)
-// No, it isn't because we read the memory in an endian safe way--it *won't* work...
+// Seems to me that both of these are in the same endian, so we could cast it
+// as uint16_t * and do straight across copies (what about 24 bpp? Treat it
+// differently...) This only works for the palettized modes (1 - 8 BPP), since
+// we actually have to copy data from memory in 16 BPP mode (or does it? Isn't
+// this the same as the CLUT case?) No, it isn't because we read the memory in
+// an endian safe way--it *won't* work...
 //This doesn't seem right... Let's try the encoded black value ($8800):
 //Apparently, CRY 0 maps to $8800...
 				if (flagTRANS && ((bitsLo | bitsHi) == 0))
@@ -1370,13 +1351,15 @@ if (firstPix)
 
 	uint8_t * tomRam8 = TOMGetRamPointer();
 	uint8_t * paletteRAM = &tomRam8[0x400];
-	// This is OK as long as it's used correctly: For 16-bit RAM to RAM direct copies--NOT
-	// for use when using endian-corrected data (i.e., any of the *ReadWord functions!)
+	// This is OK as long as it's used correctly: For 16-bit RAM to RAM direct
+	// copies--NOT for use when using endian-corrected data (i.e., any of the
+	// *ReadWord functions!)
 	uint16_t * paletteRAM16 = (uint16_t *)paletteRAM;
 
 	uint16_t hscale = p2 & 0xFF;
-// Hmm. It seems that fixing the horizontal scale necessitated re-fixing this. Not sure why,
-// but seems to be consistent with the vertical scaling now (and it may turn out to be wrong!)...
+// Hmm. It seems that fixing the horizontal scale necessitated re-fixing this.
+// Not sure why, but seems to be consistent with the vertical scaling now (and
+// it may turn out to be wrong!)...
 	uint16_t horizontalRemainder = hscale;				// Not sure if it starts full, but seems reasonable [It's not!]
 //	uint8_t horizontalRemainder = 0;					// Let's try zero! Seems to work! Yay! [No, it doesn't!]
 	int32_t scaledWidthInPixels = (iwidth * phraseWidthToPixels[depth] * hscale) >> 5;
@@ -1431,33 +1414,37 @@ if (start_logging)
 		return;
 
 	// Otherwise, find the clip limits and clip the phrase as well...
-	// NOTE: I'm fudging here by letting the actual blit overstep the bounds of the
-	//       line buffer, but it shouldn't matter since there are two unused line
-	//       buffers below and nothing above and I'll at most write 40 bytes outside
-	//       the line buffer... I could use a fractional clip begin/end value, but
-	//       this makes the blit a *lot* more hairy. I might fix this in the future
-	//       if it becomes necessary. (JLH)
-	//       Probably wouldn't be *that* hairy. Just use a delta that tells the inner loop
-	//       which pixel in the phrase is being written, and quit when either end of phrases
-	//       is reached or line buffer extents are surpassed.
+	// NOTE: I'm fudging here by letting the actual blit overstep the bounds of
+	//       the line buffer, but it shouldn't matter since there are two
+	//       unused line buffers below and nothing above and I'll at most write
+	//       40 bytes outside the line buffer... I could use a fractional clip
+	//       begin/end value, but this makes the blit a *lot* more hairy. I
+	//       might fix this in the future if it becomes necessary. (JLH)
+	//       Probably wouldn't be *that* hairy. Just use a delta that tells the
+	//       inner loop which pixel in the phrase is being written, and quit
+	//       when either end of phrases is reached or line buffer extents are
+	//       surpassed.
 
 //This stuff is probably wrong as well... !!! FIX !!!
-//The strange thing is that it seems to work, but that's no guarantee that it's bulletproof!
+//The strange thing is that it seems to work, but that's no guarantee that it's
+//bulletproof!
 //Yup. Seems that JagMania doesn't work correctly with this...
-//Dunno if this is the problem, but Atari Karts is showing *some* of the road now...
-//Actually, it is! Or, it was. It doesn't seem to be clipping here, so the problem lies
-//elsewhere! Hmm. Putting the scaling code into the 1/2/8 BPP cases seems to draw the ground
-// a bit more accurately... Strange!
-//It's probably a case of the REFLECT flag being set and the background being written
-//from the right side of the screen...
+//Dunno if this is the problem, but Atari Karts is showing *some* of the road
+//now...
+//Actually, it is! Or, it was. It doesn't seem to be clipping here, so the
+//problem lies elsewhere! Hmm. Putting the scaling code into the 1/2/8 BPP cases
+//seems to draw the ground a bit more accurately... Strange!
+//It's probably a case of the REFLECT flag being set and the background being
+//written from the right side of the screen...
 //But no, it isn't... At least if the diagnostics are telling the truth!
 
 	// NOTE: We're just using endPos to figure out how much, if any, to clip by.
-	// ALSO: There may be another case where we start out of bounds and end out of bounds...!
+	// ALSO: There may be another case where we start out of bounds and end out
+	// of bounds...!
 	// !!! FIX !!!
 
-//There's a problem here with scaledPhrasePixels in that it can be forced to zero when
-//the scaling factor is small. So fix it already! !!! FIX !!!
+//There's a problem here with scaledPhrasePixels in that it can be forced to
+//zero when the scaling factor is small. So fix it already! !!! FIX !!!
 /*if (scaledPhrasePixels == 0)
 {
 	WriteLog("OP: [Scaled] We're about to encounter a divide by zero error!\n");

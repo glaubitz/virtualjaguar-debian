@@ -28,6 +28,9 @@
 //#include "memory.h"
 
 
+// Like it says...
+//#define DSP_DEBUG_CDROM
+
 // Seems alignment in loads & stores was off...
 #define DSP_CORRECT_ALIGNMENT
 //#define DSP_CORRECT_ALIGNMENT_STORE
@@ -447,6 +450,7 @@ static uint32_t ctrl1[14], ctrl2[14];
 // Private function prototypes
 
 void DSPDumpRegisters(void);
+void DSPDumpState(void);
 void DSPDumpDisassembly(void);
 void FlushDSPPipeline(void);
 
@@ -715,6 +719,9 @@ SET16(ram2, offset, data);
 }
 
 
+#ifdef DSP_DEBUG_CDROM
+static bool startCDROMDebug = false;
+#endif
 //bool badWrite = false;
 void DSPWriteLong(uint32_t offset, uint32_t data, uint32_t who/*=UNKNOWN*/)
 {
@@ -755,8 +762,9 @@ SET32(ram2, offset, data);
 #endif
 //			bool IMASKCleared = (dsp_flags & IMASK) && !(data & IMASK);
 			IMASKCleared = (dsp_flags & IMASK) && !(data & IMASK);
-			// NOTE: According to the JTRM, writing a 1 to IMASK has no effect; only the
-			//       IRQ logic can set it. So we mask it out here to prevent problems...
+			// NOTE: According to the JTRM, writing a 1 to IMASK has no effect;
+			//       only the IRQ logic can set it. So we mask it out here to
+			//       prevent problems...
 			dsp_flags = data & (~IMASK);
 			dsp_flag_z = dsp_flags & 0x01;
 			dsp_flag_c = (dsp_flags >> 1) & 0x01;
@@ -770,8 +778,8 @@ SET32(ram2, offset, data);
 			dsp_matrix_control = data;
 			break;
 		case 0x08:
-			// According to JTRM, only lines 2-11 are addressable, the rest being
-			// hardwired to $F1Bxxx.
+			// According to JTRM, only lines 2-11 are addressable, the rest
+			// being hardwired to $F1Bxxx.
 			dsp_pointer_to_matrix = 0xF1B000 | (data & 0x000FFC);
 			break;
 		case 0x0C:
@@ -792,10 +800,10 @@ if (who != DSP)
 		case 0x14:
 		{
 //#ifdef DSP_DEBUG
-WriteLog("Write to DSP CTRL by %s: %08X (DSP PC=$%08X)\n", whoName[who], data, dsp_pc);
+WriteLog("Write to DSP CTRL by %s: %08X (DSP PC=$%08X, IMASK=%X)\n", whoName[who], data, dsp_pc, dsp_flags & IMASK);
 //#endif
 			bool wasRunning = DSP_RUNNING;
-//			uint32_t dsp_was_running = DSP_RUNNING;
+
 			// Check for DSP -> CPU interrupt
 			if (data & CPUINT)
 			{
@@ -810,19 +818,24 @@ WriteLog("Write to DSP CTRL by %s: %08X (DSP PC=$%08X)\n", whoName[who], data, d
 					DSPReleaseTimeslice();
 					m68k_set_irq(2);			// Set 68000 IPL 2...
 				}
+
 				data &= ~CPUINT;
 			}
+
 			// Check for CPU -> DSP interrupt
 			if (data & DSPINT0)
 			{
-#ifdef DSP_DEBUG
+//#ifdef DSP_DEBUG
 				WriteLog("DSP: CPU -> DSP interrupt\n");
-#endif
+WriteLog("     R28-31 = $%08X $%08X $%08X $%08X", dsp_reg_bank_0[28], dsp_reg_bank_0[29], dsp_reg_bank_0[30], dsp_reg_bank_0[31]);
+DSPDumpState();
+//#endif
 				m68k_end_timeslice();
-				DSPReleaseTimeslice();
+//				DSPReleaseTimeslice();
 				DSPSetIRQLine(DSPIRQ_CPU, ASSERT_LINE);
 				data &= ~DSPINT0;
 			}
+
 			// single stepping
 			if (data & SINGLE_STEP)
 			{
@@ -842,11 +855,18 @@ if (who != DSP)
 			// if dsp wasn't running but is now running
 			// execute a few cycles
 //This is just plain wrong, wrong, WRONG!
+//But, we need some mechanism to allow the DSP to run a bit, because otherwise
+//the 68K can run ahead of the DSP, and this breaks things. As always,
+//synchronization is the bugbear.
 #ifndef DSP_SINGLE_STEPPING
-/*			if (!dsp_was_running && DSP_RUNNING)
+#if 1
+			if (!wasRunning && DSP_RUNNING)
 			{
+//also note that this can cause weird breakage on the sound callback routing
+//(which calls the DSPExec() as well...)
 				DSPExec(200);
-			}*/
+			}
+#endif
 #else
 //This is WRONG! !!! FIX !!!
 			if (dsp_control & 0x18)
@@ -877,6 +897,10 @@ WriteLog("\n");
 		case 0x18:
 WriteLog("DSP: Modulo data %08X written by %s.\n", data, whoName[who]);
 			dsp_modulo = data;
+#ifdef DSP_DEBUG_CDROM
+if (data == 0xFFFFF800)
+	startCDROMDebug = true;
+#endif
 			break;
 		case 0x1C:
 			dsp_div_control = data;
@@ -887,9 +911,6 @@ WriteLog("DSP: Modulo data %08X written by %s.\n", data, whoName[who]);
 		return;
 	}
 
-//We don't have to break this up like this! We CAN do 32 bit writes!
-//	JaguarWriteWord(offset, (data>>16) & 0xFFFF, DSP);
-//	JaguarWriteWord(offset+2, data & 0xFFFF, DSP);
 //if (offset > 0xF1FFFF)
 //	badWrite = true;
 	JaguarWriteLong(offset, data, who);
@@ -1296,62 +1317,61 @@ void DSPDumpRegisters(void)
 }
 
 
-void DSPDone(void)
+void DSPDumpState(void)
 {
-	int i, j;
+	WriteLog("\n\n---------------------------------------------------------------------\n");
+	WriteLog("DSP I/O Registers\n");
+	WriteLog("---------------------------------------------------------------------\n");
+	WriteLog("F1A1%02X   (D_FLAGS): $%06X\n", 0x00, (dsp_flags & 0xFFFFFFF8) | (dsp_flag_n << 2) | (dsp_flag_c << 1) | dsp_flag_z);
+	WriteLog("F1A1%02X    (D_MTXC): $%04X\n", 0x04, dsp_matrix_control);
+	WriteLog("F1A1%02X    (D_MTXA): $%04X\n", 0x08, dsp_pointer_to_matrix);
+	WriteLog("F1A1%02X     (D_END): $%02X\n", 0x0C, dsp_data_organization);
+	WriteLog("F1A1%02X      (D_PC): $%06X\n", 0x10, dsp_pc);
+	WriteLog("F1A1%02X    (D_CTRL): $%06X\n", 0x14, dsp_control);
+	WriteLog("F1A1%02X     (D_MOD): $%08X\n", 0x18, dsp_modulo);
+	WriteLog("F1A1%02X  (D_REMAIN): $%08X\n", 0x1C, dsp_remain);
+	WriteLog("F1A1%02X (D_DIVCTRL): $%02X\n", 0x1C, dsp_div_control);
+	WriteLog("F1A1%02X   (D_MACHI): $%02X\n", 0x20, (dsp_acc >> 32) & 0xFF);
+	WriteLog("---------------------------------------------------------------------\n\n\n");
+
 	WriteLog("DSP: Stopped at PC=%08X dsp_modulo=%08X (dsp was%s running)\n", dsp_pc, dsp_modulo, (DSP_RUNNING ? "" : "n't"));
 	WriteLog("DSP: %sin interrupt handler\n", (dsp_flags & IMASK ? "" : "not "));
 
-	// get the active interrupt bits
+	// Get the active interrupt bits
 	int bits = ((dsp_control >> 10) & 0x20) | ((dsp_control >> 6) & 0x1F);
-	// get the interrupt mask
+	// Get the interrupt mask
 	int mask = ((dsp_flags >> 11) & 0x20) | ((dsp_flags >> 4) & 0x1F);
 
 	WriteLog("DSP: pending=$%X enabled=$%X (%s%s%s%s%s%s)\n", bits, mask,
 		(mask & 0x01 ? "CPU " : ""), (mask & 0x02 ? "I2S " : ""),
 		(mask & 0x04 ? "Timer0 " : ""), (mask & 0x08 ? "Timer1 " : ""),
 		(mask & 0x10 ? "Ext0 " : ""), (mask & 0x20 ? "Ext1" : ""));
-	WriteLog("\nRegisters bank 0\n");
-
-	for(int j=0; j<8; j++)
-	{
-		WriteLog("\tR%02i=%08X R%02i=%08X R%02i=%08X R%02i=%08X\n",
-						  (j << 2) + 0, dsp_reg_bank_0[(j << 2) + 0],
-						  (j << 2) + 1, dsp_reg_bank_0[(j << 2) + 1],
-						  (j << 2) + 2, dsp_reg_bank_0[(j << 2) + 2],
-						  (j << 2) + 3, dsp_reg_bank_0[(j << 2) + 3]);
-	}
-
-	WriteLog("\nRegisters bank 1\n");
-
-	for (j=0; j<8; j++)
-	{
-		WriteLog("\tR%02i=%08X R%02i=%08X R%02i=%08X R%02i=%08X\n",
-						  (j << 2) + 0, dsp_reg_bank_1[(j << 2) + 0],
-						  (j << 2) + 1, dsp_reg_bank_1[(j << 2) + 1],
-						  (j << 2) + 2, dsp_reg_bank_1[(j << 2) + 2],
-						  (j << 2) + 3, dsp_reg_bank_1[(j << 2) + 3]);
-	}
-
+	DSPDumpRegisters();
 	WriteLog("\n");
+}
+
+
+void DSPDone(void)
+{
+	DSPDumpState();
 
 	static char buffer[512];
-	j = DSP_WORK_RAM_BASE;
+	int j = DSP_WORK_RAM_BASE;
 
 	while (j <= 0xF1CFFF)
 	{
 		uint32_t oldj = j;
 		j += dasmjag(JAGUAR_DSP, buffer, j);
 		WriteLog("\t%08X: %s\n", oldj, buffer);
-	}//*/
+	}
 
 	WriteLog("DSP opcodes use:\n");
 
-	for (i=0;i<64;i++)
+	for(int i=0; i<64; i++)
 	{
 		if (dsp_opcode_use[i])
 			WriteLog("\t%s %i\n", dsp_opcode_str[i], dsp_opcode_use[i]);
-	}//*/
+	}
 }
 
 
@@ -1561,6 +1581,10 @@ for(int k=0; k<2; k++)
 //
 //static bool R20Set = false, tripwire = false;
 //static uint32_t pcQueue[32], ptrPCQ = 0;
+#ifdef DSP_DEBUG_CDROM
+static bool inLoop = false;
+uint32_t loopExitAddr;
+#endif
 void DSPExec(int32_t cycles)
 {
 #ifdef DSP_SINGLE_STEPPING
@@ -1577,6 +1601,35 @@ void DSPExec(int32_t cycles)
 
 	while (cycles > 0 && DSP_RUNNING)
 	{
+#ifdef DSP_DEBUG_CDROM
+if (startCDROMDebug)
+{
+	if (!inLoop)
+	{
+		char buffer[512];
+		dasmjag(JAGUAR_DSP, buffer, dsp_pc);
+		WriteLog("DSP: %08X: %s\n", dsp_pc, buffer);
+	}
+
+	uint16_t opcode = DSPReadWord(dsp_pc, DSP);
+	uint16_t index = opcode >> 10;
+	dsp_opcode_first_parameter = (opcode >> 5) & 0x1F;
+	dsp_opcode_second_parameter = opcode & 0x1F;
+
+	if (index == 53)	// JR
+	{
+		uint32_t jaguar_flags = (dsp_flag_n << 2) | (dsp_flag_c << 1) | dsp_flag_z;
+
+		if (BRANCH_CONDITION(IMM_2))
+		{
+			if (IMM_1 & 0x10)	// We're branching backward...
+				inLoop = true;
+		}
+		else
+			inLoop = false;
+	}
+}
+#endif
 /*extern uint32_t totalFrames;
 //F1B2F6: LOAD   (R14+$04), R24 [NCZ:001, R14+$04=00F20018, R24=FFFFFFFF] -> Jaguar: Unknown word read at 00F20018 by DSP (M68K PC=00E32E)
 //-> 43 + 1 + 24 -> $2B + $01 + $18 -> 101011 00001 11000 -> 1010 1100 0011 1000 -> AC38
@@ -3814,9 +3867,9 @@ static void DSP_illegal(void)
 	NO_WRITEBACK;
 }
 
-// There is a problem here with interrupt handlers the JUMP and JR instructions that
-// can cause trouble because an interrupt can occur *before* the instruction following the
-// jump can execute... !!! FIX !!!
+// There is a problem here with interrupt handlers the JUMP and JR instructions
+// that can cause trouble because an interrupt can occur *before* the
+// instruction following the jump can execute... !!! FIX !!!
 // This can probably be solved by judicious coding in the pipeline execution core...
 // And should be fixed now...
 static void DSP_jr(void)

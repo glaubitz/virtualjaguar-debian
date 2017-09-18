@@ -41,6 +41,9 @@ uint8_t TOMGetVideoMode(void);
 uint8_t * TOMGetRamPointer(void);
 uint16_t TOMGetHDB(void);
 uint16_t TOMGetVDB(void);
+uint16_t TOMGetHC(void);
+uint16_t TOMGetVP(void);
+uint16_t TOMGetMEMCON1(void);
 void TOMDumpIORegistersToLog(void);
 
 

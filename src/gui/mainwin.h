@@ -9,7 +9,7 @@
 #define __MAINWIN_H__
 
 //Hrm. uh??? I thought this wasn't the way to do this stuff...???
-#include <QtGui>
+#include <QtWidgets>
 #include "tom.h"
 
 #define RING_BUFFER_SIZE 32
@@ -35,6 +35,7 @@ class MainWin: public QMainWindow
 		MainWin(bool);
 		void LoadFile(QString);
 		void SyncUI(void);
+		void UpdateIndicator(void);
 
 	protected:
 		void closeEvent(QCloseEvent *);
@@ -92,7 +93,9 @@ class MainWin: public QMainWindow
 		int zoomLevel;
 		bool powerButtonOn;
 		bool showUntunedTankCircuit;
+	public:
 		bool cartridgeLoaded;
+	private:
 		bool allowUnknownSoftware;
 		bool CDActive;
 //		bool alpineLoadSuccessful;
@@ -142,8 +145,10 @@ class MainWin: public QMainWindow
 		QAction * m68kDasmBrowseAct;
 		QAction * riscDasmBrowseAct;
 
+		QLabel * indicator;
 		QIcon powerGreen;
 		QIcon powerRed;
+		QIcon blur;
 		uint32_t testPattern[VIRTUAL_SCREEN_WIDTH * VIRTUAL_SCREEN_HEIGHT_PAL];
 		uint32_t testPattern2[VIRTUAL_SCREEN_WIDTH * VIRTUAL_SCREEN_HEIGHT_PAL];
 };

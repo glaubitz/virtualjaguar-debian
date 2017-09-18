@@ -53,19 +53,19 @@ obj:
 
 prepare: obj
 	@echo -e "\033[01;33m***\033[00;32m Preparing to compile Virtual Jaguar...\033[00m"
-	@echo "#define VJ_RELEASE_VERSION \"v2.1.2\"" > src/version.h
-	@echo "#define VJ_RELEASE_SUBVERSION \"Final\"" >> src/version.h
-	@echo "#define VJ_REMOVE_DEV_CODE" >> src/version.h
-#	@echo "#define VJ_RELEASE_VERSION \"GIT `git log -1 --pretty=format:%ci | cut -d ' ' -f 1 | tr -d -`\"" > src/version.h
-#	@echo "#define VJ_RELEASE_SUBVERSION \"2.1.2 Prerelease\"" >> src/version.h
+#	@echo "#define VJ_RELEASE_VERSION \"v2.1.4\"" > src/version.h
+#	@echo "#define VJ_RELEASE_SUBVERSION \"Final\"" >> src/version.h
+#	@echo "#define VJ_REMOVE_DEV_CODE" >> src/version.h
+	@echo "#define VJ_RELEASE_VERSION \"GIT `git log -1 --pretty=format:%ci | cut -d ' ' -f 1 | tr -d -`\"" > src/version.h
+	@echo "#define VJ_RELEASE_SUBVERSION \"2.1.4 Prerelease\"" >> src/version.h
 
 virtualjaguar: sources libs makefile-qt
 	@echo -e "\033[01;33m***\033[00;32m Making Virtual Jaguar GUI...\033[00m"
-	$(Q)$(MAKE) -f makefile-qt CROSS=$(CROSS) V="$(V)"
+	$(Q)$(MAKE) -f makefile-qt CROSS=$(CROSS) V="$(V)" CDIO=libcdio
 
 makefile-qt: virtualjaguar.pro
 	@echo -e "\033[01;33m***\033[00;32m Creating Qt makefile...\033[00m"
-	$(Q)$(CROSS)qmake $(QMAKE_EXTRA) virtualjaguar.pro -o makefile-qt
+	$(Q)$(CROSS)qmake -qt=5 $(QMAKE_EXTRA) virtualjaguar.pro -o makefile-qt
 
 libs: obj/libm68k.a obj/libjaguarcore.a
 	@echo -e "\033[01;33m***\033[00;32m Libraries successfully made.\033[00m"

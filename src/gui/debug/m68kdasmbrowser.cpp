@@ -31,6 +31,9 @@ M68KDasmBrowserWindow::M68KDasmBrowserWindow(QWidget * parent/*= 0*/): QWidget(p
 {
 	setWindowTitle(tr("M68K Disassembly Browser"));
 
+	// Make label text selectable
+	text->setTextInteractionFlags(Qt::TextSelectableByMouse);
+
 	address->setInputMask("hhhhhh");
 	QHBoxLayout * hbox1 = new QHBoxLayout;
 	hbox1->addWidget(refresh);
@@ -40,8 +43,8 @@ M68KDasmBrowserWindow::M68KDasmBrowserWindow(QWidget * parent/*= 0*/): QWidget(p
 	// Need to set the size as well...
 //	resize(560, 480);
 
-//	QFont fixedFont("Lucida Console", 8, QFont::Normal);
-	QFont fixedFont("", 8, QFont::Normal);
+	QFont fixedFont("Lucida Console", 8, QFont::Normal);
+//	QFont fixedFont("", 8, QFont::Normal);
 	fixedFont.setStyleHint(QFont::TypeWriter);
 	text->setFont(fixedFont);
 ////	layout->setSizeConstraint(QLayout::SetFixedSize);

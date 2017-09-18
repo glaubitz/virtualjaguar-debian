@@ -3,18 +3,15 @@
 //
 // Originally by David Raingeard (cal2)
 // GCC/SDL port by Niels Wagenaar (Linux/WIN32) and Caz (BeOS)
-// Cleanups and endian wrongness amelioration by James Hammons
+// Cleanups, endian wrongness amelioration, and extensive fixes by James Hammons
 // (C) 2010 Underground Software
 //
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  -----------------------------------------------------------
 // JLH  01/16/2010  Created this log ;-)
 // JLH  01/20/2011  Change rendering to RGBA, removed unnecessary code
-//
-// Note: Endian wrongness probably stems from the MAME origins of this emu and
-//       the braindead way in which MAME used to handle memory. :-}
 //
 // Note: TOM has only a 16K memory space
 //
@@ -276,42 +273,41 @@
 #define MEMCON2		0x02
 #define HC			0x04
 #define VC			0x06
-#define OLP			0x20		// Object list pointer
-#define OBF			0x26		// Object processor flag
+#define OLP			0x20	// Object list pointer
+#define OBF			0x26	// Object processor flag
 #define VMODE		0x28
-#define   MODE		0x0006		// Line buffer to video generator mode
-#define   BGEN		0x0080		// Background enable (CRY & RGB16 only)
-#define   VARMOD	0x0100		// Mixed CRY/RGB16 mode (only works in MODE 0!)
-#define   PWIDTH	0x0E00		// Pixel width in video clock cycles (value written + 1)
-#define BORD1		0x2A		// Border green/red values (8 BPP)
-#define BORD2		0x2C		// Border blue value (8 BPP)
-#define HP			0x2E		// Values range from 1 - 1024 (value written + 1)
-#define HBB			0x30		// Horizontal blank begin
+#define   MODE		0x0006	// Line buffer to video generator mode
+#define   BGEN		0x0080	// Background enable (CRY & RGB16 only)
+#define   VARMOD	0x0100	// Mixed CRY/RGB16 mode (only works in MODE 0!)
+#define   PWIDTH	0x0E00	// Pixel width in video clock cycles (value written + 1)
+#define BORD1		0x2A	// Border green/red values (8 BPP)
+#define BORD2		0x2C	// Border blue value (8 BPP)
+#define HP			0x2E	// Values range from 1 - 1024 (value written + 1)
+#define HBB			0x30	// Horizontal blank begin
 #define HBE			0x32
-#define HS			0x34		// Horizontal sync
-#define HVS			0x36		// Horizontal vertical sync
-#define HDB1		0x38		// Horizontal display begin 1
+#define HS			0x34	// Horizontal sync
+#define HVS			0x36	// Horizontal vertical sync
+#define HDB1		0x38	// Horizontal display begin 1
 #define HDB2		0x3A
 #define HDE			0x3C
-#define VP			0x3E		// Value ranges from 1 - 2048 (value written + 1)
-#define VBB			0x40		// Vertical blank begin
+#define VP			0x3E	// Value ranges from 1 - 2048 (value written + 1)
+#define VBB			0x40	// Vertical blank begin
 #define VBE			0x42
-#define VS			0x44		// Vertical sync
-#define VDB			0x46		// Vertical display begin
+#define VS			0x44	// Vertical sync
+#define VDB			0x46	// Vertical display begin
 #define VDE			0x48
-#define VEB			0x4A		// Vertical equalization begin
-#define VEE			0x4C		// Vertical equalization end
-#define VI			0x4E		// Vertical interrupt
+#define VEB			0x4A	// Vertical equalization begin
+#define VEE			0x4C	// Vertical equalization end
+#define VI			0x4E	// Vertical interrupt
 #define PIT0		0x50
 #define PIT1		0x52
-#define HEQ			0x54		// Horizontal equalization end
-#define BG			0x58		// Background color
+#define HEQ			0x54	// Horizontal equalization end
+#define BG			0x58	// Background color
 #define INT1		0xE0
 #define INT2		0xE2
 
-//NOTE: These arbitrary cutoffs are NOT taken into account for PAL jaguar screens. !!! FIX !!! [DONE]
-
-// Arbitrary video cutoff values (i.e., first/last visible spots on a TV, in HC ticks)
+// Arbitrary video cutoff values (i.e., first/last visible spots on a TV, in HC
+// ticks)
 // Also note that VC is in *half* lines, i.e. divide by 2 to get the scanline
 /*#define LEFT_VISIBLE_HC			208
 #define RIGHT_VISIBLE_HC		1528//*/
@@ -560,6 +556,7 @@ Trevor McFur
 Vertical resolution: 238 lines
 */
 
+// 16-bit color lookup tables
 uint32_t RGB16ToRGB32[0x10000];
 uint32_t CRY16ToRGB32[0x10000];
 uint32_t MIX16ToRGB32[0x10000];
@@ -571,12 +568,8 @@ void TOMFillLookupTables(void)
 	// NOTE: Jaguar 16-bit (non-CRY) color is RBG 556 like so:
 	//       RRRR RBBB BBGG GGGG
 	for(uint32_t i=0; i<0x10000; i++)
-//hm.		RGB16ToRGB32[i] = 0xFF000000
-//			| ((i & 0xF100) >> 8)  | ((i & 0xE000) >> 13)
-//			| ((i & 0x07C0) << 13) | ((i & 0x0700) << 8)
-//			| ((i & 0x003F) << 10) | ((i & 0x0030) << 4);
 		RGB16ToRGB32[i] = 0x000000FF
-			| ((i & 0xF100) << 16)					// Red
+			| ((i & 0xF800) << 16)					// Red
 			| ((i & 0x003F) << 18)					// Green
 			| ((i & 0x07C0) << 5);					// Blue
 
@@ -590,7 +583,6 @@ void TOMFillLookupTables(void)
 			g = (((uint32_t)greencv[cyan][red]) * intensity) >> 8,
 			b = (((uint32_t)bluecv[cyan][red]) * intensity) >> 8;
 
-//hm.		CRY16ToRGB32[i] = 0xFF000000 | (b << 16) | (g << 8) | r;
 		CRY16ToRGB32[i] = 0x000000FF | (r << 24) | (g << 16) | (b << 8);
 		MIX16ToRGB32[i] = (i & 0x01 ? RGB16ToRGB32[i] : CRY16ToRGB32[i]);
 	}
@@ -645,6 +637,24 @@ uint8_t TOMGetVideoMode(void)
 uint16_t TOMGetVDB(void)
 {
 	return GET16(tomRam8, VDB);
+}
+
+
+uint16_t TOMGetHC(void)
+{
+	return GET16(tomRam8, HC);
+}
+
+
+uint16_t TOMGetVP(void)
+{
+	return GET16(tomRam8, VP);
+}
+
+
+uint16_t TOMGetMEMCON1(void)
+{
+	return GET16(tomRam8, MEMCON1);
 }
 
 
@@ -714,6 +724,7 @@ void tom_render_16bpp_cry_scanline(uint32_t * backbuffer)
 	//NOTE: May have to check HDB2 as well!
 	int16_t startPos = GET16(tomRam8, HDB1) - (vjs.hardwareTypeNTSC ? LEFT_VISIBLE_HC : LEFT_VISIBLE_HC_PAL);// Get start position in HC ticks
 	startPos /= pwidth;
+
 	if (startPos < 0)
 		current_line_buffer += 2 * -startPos;
 	else
@@ -756,6 +767,7 @@ void tom_render_24bpp_scanline(uint32_t * backbuffer)
 	//NOTE: May have to check HDB2 as well!
 	int16_t startPos = GET16(tomRam8, HDB1) - (vjs.hardwareTypeNTSC ? LEFT_VISIBLE_HC : LEFT_VISIBLE_HC_PAL);	// Get start position in HC ticks
 	startPos /= pwidth;
+
 	if (startPos < 0)
 		current_line_buffer += 4 * -startPos;
 	else
@@ -780,15 +792,14 @@ void tom_render_24bpp_scanline(uint32_t * backbuffer)
 		uint32_t r = *current_line_buffer++;
 		current_line_buffer++;
 		uint32_t b = *current_line_buffer++;
-//hm.		*backbuffer++ = 0xFF000000 | (b << 16) | (g << 8) | r;
 		*backbuffer++ = 0x000000FF | (r << 24) | (g << 16) | (b << 8);
 		width--;
 	}
 }
 
 
-//Seems to me that this is NOT a valid mode--the JTRM seems to imply that you would need
-//extra hardware outside of the Jaguar console to support this!
+// Seems to me that this is NOT a valid mode--the JTRM seems to imply that you
+// would need extra hardware outside of the Jaguar console to support this!
 //
 // 16 BPP direct mode rendering
 //
@@ -853,37 +864,35 @@ void tom_render_16bpp_rgb_scanline(uint32_t * backbuffer)
 
 
 //
-// Process a single scanline
-// (this is bad terminology; each tick of the VC is actually a half-line)
+// Process a single halfline
 //
 void TOMExecHalfline(uint16_t halfline, bool render)
 {
-#warning "!!! Need to handle multiple fields properly !!!"
-	// We ignore the problem for now
-	halfline &= 0x7FF;
-
+	uint16_t field2 = halfline & 0x0800;
+	halfline &= 0x07FF;
 	bool inActiveDisplayArea = true;
 
-//Interlacing is still not handled correctly here... !!! FIX !!!
-	if (halfline & 0x01)							// Execute OP only on even halflines (non-interlaced only!)
+	// Execute OP only on even halflines (skip higher resolutions for now...)
+	if (halfline & 0x01)
 		return;
 
 //Hm, it seems that the OP needs to execute from zero, so let's try it:
-// And it works! But need to do some optimizations in the OP to keep it from attempting
-// to do a scanline render in the non-display area... [DONE]
+// And it works! But need to do some optimizations in the OP to keep it from
+// attempting to do a scanline render in the non-display area... [DONE]
 //this seems to cause a regression in certain games, like rayman
 //which means I have to dig thru the asic nets to see what's wrong...
 /*
-No, the OP doesn't start until VDB, that much is certain. The thing is, VDB is the
-HALF line that the OP starts on--which means that it needs to start at VDB / 2!!!
+No, the OP doesn't start until VDB, that much is certain. The thing is, VDB is
+the HALF line that the OP starts on--which means that it needs to start at
+VDB / 2!!!
 
-Hrm, doesn't seem to be enough, though it should be... still sticks for 20 frames.
+Hrm, doesn't seem to be enough, though it should be... still sticks for 20
+frames.
 
-
-What triggers this is writing $FFFF to VDE. This causes the OP start signal in VID to 
-latch on, which in effect sets VDB to zero. So that much is correct. But the thing with
-Rayman is that it shouldn't cause the graphical glitches seen there, so still have to
-investigate what's going on there. By all rights, it shouldn't glitch because:
+What triggers this is writing $FFFF to VDE. This causes the OP start signal in VID to latch on, which in effect sets VDB to zero. So that much is correct. But
+the thing with Rayman is that it shouldn't cause the graphical glitches seen
+there, so still have to investigate what's going on there. By all rights, it
+shouldn't glitch because:
 
 00006C00: 0000000D 82008F73 (BRANCH) YPOS=494, CC=">", link=$00006C10
 00006C08: 000003FF 00008173 (BRANCH) YPOS=46, CC=">", link=$001FF800
@@ -891,8 +900,8 @@ investigate what's going on there. By all rights, it shouldn't glitch because:
 001FF800: 12FC2BFF 02380000 (BITMAP)
           00008004 8180CFF1
 
-Even if the OP is running all the time, the link should tell it to stop at the right
-place (which it seems to do). But we still get glitchy screen.
+Even if the OP is running all the time, the link should tell it to stop at the
+right place (which it seems to do). But we still get glitchy screen.
 
 Seems the glitchy screen went away... Maybe the GPU alignment fixes fixed it???
 Just need to add the proper checking here then.
@@ -920,24 +929,19 @@ TOM: Vertical Display Begin written by M68K: 41
 TOM: Vertical Display End written by M68K: 2047
 TOM: Vertical Interrupt written by M68K: 491
 */
-#if 1
+
 	// Initial values that "well behaved" programs use
 	uint16_t startingHalfline = GET16(tomRam8, VDB);
 	uint16_t endingHalfline = GET16(tomRam8, VDE);
 
 	// Simulate the OP start bug here!
 	// Really, this value is somewhere around 507 for an NTSC Jaguar. But this
-	// should work in a majority of cases, at least until we can figure it out properly.
+	// should work in a majority of cases, at least until we can figure it out
+	// properly.
 	if (endingHalfline > GET16(tomRam8, VP))
 		startingHalfline = 0;
 
-	if (halfline >= startingHalfline && halfline < endingHalfline)
-//	if (halfline >= 0 && halfline < (uint16_t)GET16(tomRam8, VDE))
-// 16 isn't enough, and neither is 32 for raptgun. 32 fucks up Rayman
-//	if (halfline >= ((uint16_t)GET16(tomRam8, VDB) / 2) && halfline < ((uint16_t)GET16(tomRam8, VDE) / 2))
-//	if (halfline >= ((uint16_t)GET16(tomRam8, VDB) - 16) && halfline < (uint16_t)GET16(tomRam8, VDE))
-//	if (halfline >= 20 && halfline < (uint16_t)GET16(tomRam8, VDE))
-//	if (halfline >= (uint16_t)GET16(tomRam8, VDB) && halfline < (uint16_t)GET16(tomRam8, VDE))
+	if ((halfline >= startingHalfline) && (halfline < endingHalfline))
 	{
 		if (render)
 		{
@@ -954,49 +958,33 @@ TOM: Vertical Interrupt written by M68K: 491
 	}
 	else
 		inActiveDisplayArea = false;
-#else
-	inActiveDisplayArea =
-		(halfline >= (uint16_t)GET16(tomRam8, VDB) && halfline < (uint16_t)GET16(tomRam8, VDE)
-			? true : false);
 
-	if (halfline < (uint16_t)GET16(tomRam8, VDE))
-	{
-		if (render)//With JaguarExecuteNew() this is always true...
-		{
-			uint8_t * current_line_buffer = (uint8_t *)&tomRam8[0x1800];
-			uint8_t bgHI = tomRam8[BG], bgLO = tomRam8[BG + 1];
-
-			// Clear line buffer with BG
-			if (GET16(tomRam8, VMODE) & BGEN) // && (CRY or RGB16)...
-				for(uint32_t i=0; i<720; i++)
-					*current_line_buffer++ = bgHI, *current_line_buffer++ = bgLO;
-
-//			OPProcessList(halfline, render);
-//This seems to take care of it...
-			OPProcessList(halfline, inActiveDisplayArea);
-		}
-	}
-#endif
-
-	// Try to take PAL into account... [We do now!]
+	// Take PAL into account...
 
 	uint16_t topVisible = (vjs.hardwareTypeNTSC ? TOP_VISIBLE_VC : TOP_VISIBLE_VC_PAL),
 		bottomVisible = (vjs.hardwareTypeNTSC ? BOTTOM_VISIBLE_VC : BOTTOM_VISIBLE_VC_PAL);
-	uint32_t * TOMCurrentLine = &(screenBuffer[((halfline - topVisible) / 2) * screenPitch]);
+	uint32_t * TOMCurrentLine = 0;
+
+	// Bit 0 in VP is interlace flag. 0 = interlace, 1 = non-interlaced
+	if (tomRam8[VP + 1] & 0x01)
+		TOMCurrentLine = &(screenBuffer[((halfline - topVisible) / 2) * screenPitch]);//non-interlace
+	else
+		TOMCurrentLine = &(screenBuffer[(((halfline - topVisible) / 2) * screenPitch * 2) + (field2 ? 0 : screenPitch)]);//interlace
 
 	// Here's our virtualized scanline code...
 
-	if (halfline >= topVisible && halfline < bottomVisible)
+	if ((halfline >= topVisible) && (halfline < bottomVisible))
 	{
 		if (inActiveDisplayArea)
 		{
-//NOTE: The following doesn't put BORDER color on the sides... !!! FIX !!!
 #warning "The following doesn't put BORDER color on the sides... !!! FIX !!!"
 			if (vjs.renderType == RT_NORMAL)
-//				scanline_render[TOMGetVideoMode()](TOMBackbuffer);
-				scanline_render[TOMGetVideoMode()](TOMCurrentLine);
-			else//TV type render
 			{
+				scanline_render[TOMGetVideoMode()](TOMCurrentLine);
+			}
+			else
+			{
+				// TV type render
 /*
 	tom_render_16bpp_cry_scanline,
 	tom_render_24bpp_scanline,
@@ -1013,13 +1001,14 @@ TOM: Vertical Interrupt written by M68K: 491
 				uint8_t pwidth = ((GET16(tomRam8, VMODE) & PWIDTH) >> 9) + 1;
 				uint8_t mode = ((GET16(tomRam8, VMODE) & MODE) >> 1);
 				bool varmod = GET16(tomRam8, VMODE) & VARMOD;
-//The video texture line buffer ranges from 0 to 1279, with its left edge starting at
-//LEFT_VISIBLE_HC. So, we need to start writing into the backbuffer at HDB1, using pwidth
-//as our scaling factor. The way it generates its image on a real TV!
+//The video texture line buffer ranges from 0 to 1279, with its left edge
+//starting at LEFT_VISIBLE_HC. So, we need to start writing into the backbuffer
+//at HDB1, using pwidth as our scaling factor. The way it generates its image
+//on a real TV!
 
-//So, for example, if HDB1 is less than LEFT_VISIBLE_HC, then we have to figure out where
-//in the VTLB that we start writing pixels from the Jaguar line buffer (VTLB start=0,
-//JLB=something).
+//So, for example, if HDB1 is less than LEFT_VISIBLE_HC, then we have to figure
+//out where in the VTLB that we start writing pixels from the Jaguar line
+//buffer (VTLB start=0, JLB=something).
 #if 0
 //
 // 24 BPP mode rendering
@@ -1087,22 +1076,15 @@ void TOMDone(void)
 	TOMDumpIORegistersToLog();
 	OPDone();
 	BlitterDone();
-	WriteLog("TOM: Resolution %i x %i %s\n", TOMGetVideoModeWidth(), TOMGetVideoModeHeight(),
-		videoMode_to_str[TOMGetVideoMode()]);
-//	WriteLog("\ntom: object processor:\n");
-//	WriteLog("tom: pointer to object list: 0x%.8x\n",op_get_list_pointer());
-//	WriteLog("tom: INT1=0x%.2x%.2x\n",TOMReadByte(0xf000e0),TOMReadByte(0xf000e1));
+	WriteLog("TOM: Resolution %i x %i %s\n", TOMGetVideoModeWidth(),
+		TOMGetVideoModeHeight(), videoMode_to_str[TOMGetVideoMode()]);
 }
 
 
 uint32_t TOMGetVideoModeWidth(void)
 {
-	//These widths are pretty bogus. Should use HDB1/2 & HDE/HBB & PWIDTH to calc the width...
-//	uint32_t width[8] = { 1330, 665, 443, 332, 266, 222, 190, 166 };
-//Temporary, for testing Doom...
-//	uint32_t width[8] = { 1330, 665, 443, 332, 266, 222, 190, 332 };
-
-	// Note that the following PWIDTH values have the following pixel aspect ratios:
+	// Note that the following PWIDTH values have the following pixel aspect
+	// ratios:
 	// PWIDTH = 1 -> 0.25:1 (1:4) pixels (X:Y ratio)
 	// PWIDTH = 2 -> 0.50:1 (1:2) pixels
 	// PWIDTH = 3 -> 0.75:1 (3:4) pixels
@@ -1112,80 +1094,21 @@ uint32_t TOMGetVideoModeWidth(void)
 	// PWIDTH = 7 -> 1.75:1 (7:4) pixels
 	// PWIDTH = 8 -> 2.00:1 (2:1) pixels
 
-	// Also note that the JTRM says that PWIDTH of 4 gives pixels that are "about" square--
-	// this implies that the other modes have pixels that are *not* square!
+	// Also note that the JTRM says that PWIDTH of 4 gives pixels that are
+	// "about" square--this implies that the other modes have pixels that are
+	// *not* square (and they aren't)!
 	// Also, I seriously doubt that you will see any games that use PWIDTH = 1!
 
-	// NOTE: Even though the PWIDTH value is + 1, here we're using a zero-based index and
-	//       so we don't bother to add one...
-//	return width[(GET16(tomRam8, VMODE) & PWIDTH) >> 9];
-
-	// Now, we just calculate it...
-/*	uint16_t hdb1 = GET16(tomRam8, HDB1), hde = GET16(tomRam8, HDE),
-		hbb = GET16(tomRam8, HBB), pwidth = ((GET16(tomRam8, VMODE) & PWIDTH) >> 9) + 1;
-//	return ((hbb < hde ? hbb : hde) - hdb1) / pwidth;
-//Temporary, for testing Doom...
-	return ((hbb < hde ? hbb : hde) - hdb1) / (pwidth == 8 ? 4 : pwidth);*/
-
-	// To make it easier to make a quasi-fixed display size, we restrict the viewing
-	// area to an arbitrary range of the Horizontal Count.
+	// To make it easier to make a quasi-fixed display size, we restrict the
+	// viewing area to an arbitrary range of the Horizontal Count.
 	uint16_t pwidth = ((GET16(tomRam8, VMODE) & PWIDTH) >> 9) + 1;
 	return (vjs.hardwareTypeNTSC ? RIGHT_VISIBLE_HC - LEFT_VISIBLE_HC : RIGHT_VISIBLE_HC_PAL - LEFT_VISIBLE_HC_PAL) / pwidth;
-//Temporary, for testing Doom...
-//	return (RIGHT_VISIBLE_HC - LEFT_VISIBLE_HC) / (pwidth == 8 ? 4 : pwidth);
-////	return (RIGHT_VISIBLE_HC - LEFT_VISIBLE_HC) / (pwidth == 4 ? 8 : pwidth);
-
-// More speculating...
-// According to the JTRM, the number of potential pixels across is given by the
-// Horizontal Period (HP - in NTSC this is 845). The Horizontal Count counts from
-// zero to this value twice per scanline (the high bit is set on the second count).
-// HBE and HBB define the absolute "black" limits of the screen, while HDB1/2 and
-// HDE determine the extent of the OP "on" time. I.e., when the OP is turned on by
-// HDB1, it starts fetching the line from position 0 in LBUF.
-
-// The trick, it would seem, is to figure out how long the typical visible scanline
-// of a TV is in HP ticks and limit the visible area to that (divided by PWIDTH, of
-// course). Using that length, we can establish an "absolute left display limit" with
-// which to measure HBB & HDB1/2 against when rendering LBUF (i.e., if HDB1 is 20 ticks
-// to the right of the ALDL and PWIDTH is 4, then start writing the LBUF starting at
-// backbuffer + 5 pixels).
-
-// That's basically what we're doing now...!
 }
 
 
-// *** SPECULATION ***
-// It might work better to virtualize the height settings, i.e., set the vertical
-// height at 240 lines and clip using the VDB and VDE/VP registers...
-// Same with the width... [Width is pretty much virtualized now.]
-
-// Now that that the width is virtualized, let's virtualize the height. :-)
 uint32_t TOMGetVideoModeHeight(void)
 {
-//	uint16_t vmode = GET16(tomRam8, VMODE);
-//	uint16_t vbe = GET16(tomRam8, VBE);
-//	uint16_t vbb = GET16(tomRam8, VBB);
-//	uint16_t vdb = GET16(tomRam8, VDB);
-//	uint16_t vde = GET16(tomRam8, VDE);
-//	uint16_t vp = GET16(tomRam8, VP);
-
-/*	if (vde == 0xFFFF)
-		vde = vbb;//*/
-
-//	return 227;//WAS:(vde/*-vdb*/) >> 1;
-	// The video mode height probably works this way:
-	// VC counts from 0 to VP. VDB starts the OP. Either when
-	// VDE is reached or VP, the OP is stopped. Let's try it...
-	// Also note that we're conveniently ignoring interlaced display modes...!
-//	return ((vde > vp ? vp : vde) - vdb) >> 1;
-//	return ((vde > vbb ? vbb : vde) - vdb) >> 1;
-//Let's try from the Vertical Blank interval...
-//Seems to work OK!
-//	return (vbb - vbe) >> 1;	// Again, doesn't take interlacing into account...
-// This of course doesn't take interlacing into account. But I haven't seen any
-// Jaguar software that takes advantage of it either...
-//Also, doesn't reflect PAL Jaguar either... !!! FIX !!! [DONE]
-//	return 240;										// Set virtual screen height to 240 lines...
+	// Set virtual screen height to 240 (NTSC) or 256 (PAL) lines...
 	return (vjs.hardwareTypeNTSC ? 240 : 256);
 }
 
@@ -1648,7 +1571,7 @@ if (offset == MEMCON2)
 //if (offset == OBF)
 //	WriteLog("TOM: Object Processor Flag written by %s: %u\n", whoName[who], data);
 if (offset == VMODE)
-	WriteLog("TOM: Video Mode written by %s: %04X. PWIDTH = %u, MODE = %s, flags:%s%s (VC = %u)\n", whoName[who], data, ((data >> 9) & 0x07) + 1, videoMode_to_str[(data & MODE) >> 1], (data & BGEN ? " BGEN" : ""), (data & VARMOD ? " VARMOD" : ""), GET16(tomRam8, VC));
+	WriteLog("TOM: Video Mode written by %s: %04X. PWIDTH = %u, MODE = %s, flags:%s%s (VC = %u) (M68K PC = %06X)\n", whoName[who], data, ((data >> 9) & 0x07) + 1, videoMode_to_str[(data & MODE) >> 1], (data & BGEN ? " BGEN" : ""), (data & VARMOD ? " VARMOD" : ""), GET16(tomRam8, VC), m68k_get_reg(NULL, M68K_REG_PC));
 if (offset == BORD1)
 	WriteLog("TOM: Border 1 written by %s: $%04X\n", whoName[who], data);
 if (offset == BORD2)

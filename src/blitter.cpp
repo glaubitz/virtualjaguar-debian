@@ -7,7 +7,7 @@
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  -----------------------------------------------------------
 // JLH  01/16/2010  Created this log ;-)
 //
 
@@ -17,7 +17,6 @@
 // to Curt. ;-) Without that excellent documentation which shows *exactly*
 // what's going on inside the TOM chip, we'd all still be guessing as to how
 // the wily blitter and other pieces of the Jaguar puzzle actually work.
-// Now how about those JERRY ASIC nets gentlemen...? [We have those now!] ;-)
 //
 
 #include "blitter.h"
@@ -5388,7 +5387,7 @@ Addq_x		:= JOIN (addq_x, addq_x[0..5], addqt_x[6..15]);
 Addq_y		:= JOIN (addq_y, addq_y[0..15]);*/
 
 ////////////////////////////////////// C++ CODE //////////////////////////////////////
-	int16_t mask[8] = { 0xFFFF, 0xFFFE, 0xFFFC, 0xFFF8, 0xFFF0, 0xFFE0, 0xFFC0, 0x0000 };
+	uint16_t mask[8] = { 0xFFFF, 0xFFFE, 0xFFFC, 0xFFF8, 0xFFF0, 0xFFE0, 0xFFC0, 0x0000 };
 	addq_x = addqt_x & mask[modx];
 	addq_y = addqt_y & 0xFFFF;
 //////////////////////////////////////////////////////////////////////////////////////

@@ -7,7 +7,7 @@
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  -----------------------------------------------------------
 // JLH  12/01/2012  Created this file
 //
 
@@ -26,11 +26,14 @@ OPBrowserWindow::OPBrowserWindow(QWidget * parent/*= 0*/): QWidget(parent, Qt::D
 {
 	setWindowTitle(tr("OP Browser"));
 
+	// Make label text selectable
+	text->setTextInteractionFlags(Qt::TextSelectableByMouse);
+
 	// Need to set the size as well...
 //	resize(560, 480);
 
-//	QFont fixedFont("Lucida Console", 8, QFont::Normal);
-	QFont fixedFont("", 8, QFont::Normal);
+	QFont fixedFont("Lucida Console", 8, QFont::Normal);
+//	QFont fixedFont("", 8, QFont::Normal);
 	fixedFont.setStyleHint(QFont::TypeWriter);
 	text->setFont(fixedFont);
 ////	layout->setSizeConstraint(QLayout::SetFixedSize);
@@ -107,9 +110,12 @@ void OPBrowserWindow::DiscoverObjects(uint32_t address)
 
 		if (objectType == 3)
 		{
-			// Recursion needed to follow all links! This does depth-first recursion
-			// on the not-taken objects
-			DiscoverObjects(address + 8);
+			// Branch if YPOS < 2047 (or YPOS > 0) can be treated as a GOTO, so
+			// don't do any discovery in that case. Otherwise, have at it:
+			if (((lo & 0xFFFF) != 0x7FFB) && ((lo & 0xFFFF) != 0x8003))
+				// Recursion needed to follow all links! This does depth-first
+				// recursion on the not-taken objects
+				DiscoverObjects(address + 8);
 		}
 
 		// Get the next object...
@@ -152,12 +158,15 @@ void OPBrowserWindow::DumpObjectList(QString & list)
 
 		list += "<br>";
 
+		// Yes, the OP really determines bitmap/scaled bitmap address for the
+		// following phrases this way...!
 		if (objectType == 0)
-			DumpFixedObject(list, OPLoadPhrase(address + 0), OPLoadPhrase(address + 8));
+			DumpFixedObject(list, OPLoadPhrase(address + 0),
+				OPLoadPhrase(address | 0x08));
 
 		if (objectType == 1)
-			DumpScaledObject(list, OPLoadPhrase(address + 0), OPLoadPhrase(address + 8),
-				OPLoadPhrase(address + 16));
+			DumpScaledObject(list, OPLoadPhrase(address + 0),
+				OPLoadPhrase(address | 0x08), OPLoadPhrase(address | 0x10));
 
 		if (address == link)	// Ruh roh...
 		{

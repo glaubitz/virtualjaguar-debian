@@ -5,7 +5,6 @@
 #ifndef __JERRY_H__
 #define __JERRY_H__
 
-//#include "types.h"
 #include "memory.h"
 
 void JERRYInit(void);

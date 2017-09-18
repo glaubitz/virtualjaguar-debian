@@ -1,8 +1,18 @@
+Virtual Jaguar v2.1.3 GCC/Qt
+----------------------------
+
+* This is mainly to freeze in the Qt5 libs, since it's been THAT LONG since the
+  last full release. We hang our heads in shame. [Shamus]
+* Added Memory Track support. [Shamus]
+* Added interlaced mode handling. [Shamus]
+
+
 Virtual Jaguar v2.1.2 GCC/Qt
 ----------------------------
 
 * Bugfix for catastrophic failure in Controller config dialog. Thanks to ggn for
   reporting this! [Shamus]
+* Bugfix for non-English locales. Thanks to SCPCD for reporting! [Shamus]
 
 
 Virtual Jaguar v2.1.1 GCC/Qt
@@ -13,7 +23,7 @@ Virtual Jaguar v2.1.1 GCC/Qt
   config for the new controller without destroying the old one. This also means
   that if you have *no* controllers, you can still play VJ with the keyboard.
   [Shamus]
-* Fixed a few problems with the DSP a timing; as a result, the sound in Rayman
+* Fixed a few problems with the DSP timing; as a result, the sound in Rayman
   and the FACTS demo is correct now. [Shamus]
 * Removed toolbar from full screen mode. [Shamus]
 * Added analog inputs to gamepad support. [Shamus]

@@ -19,9 +19,9 @@ extern uint8_t * dspRAM;
 #if 1
 extern uint32_t & butch, & dscntrl;
 extern uint16_t & ds_data;
-extern uint32_t & i2cntrl, & sbcntrl, & subdata, & subdatb, & sb_time, & fifo_data, & i2sdat2, & unknown;
+extern uint32_t & i2cntrl, & sbcntrl, & subdata, & subdatb, & sb_time, & fifo_data, & i2sdat2, & i2sbus;
 #else
-extern uint32_t butch, dscntrl, ds_data, i2cntrl, sbcntrl, subdata, subdatb, sb_time, fifo_data, i2sdat2, unknown;
+extern uint32_t butch, dscntrl, ds_data, i2cntrl, sbcntrl, subdata, subdatb, sb_time, fifo_data, i2sdat2, i2sbus;
 #endif
 
 extern uint16_t & memcon1, & memcon2, & hc, & vc, & lph, & lpv;
