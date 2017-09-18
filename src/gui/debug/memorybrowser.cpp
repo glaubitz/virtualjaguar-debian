@@ -7,7 +7,7 @@
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  -----------------------------------------------------------
 // JLH  08/14/2012  Created this file
 //
 
@@ -28,6 +28,9 @@ MemoryBrowserWindow::MemoryBrowserWindow(QWidget * parent/*= 0*/): QWidget(paren
 {
 	setWindowTitle(tr("Memory Browser"));
 
+	// Make label text selectable
+	text->setTextInteractionFlags(Qt::TextSelectableByMouse);
+
 	address->setInputMask("hhhhhh");
 	QHBoxLayout * hbox1 = new QHBoxLayout;
 	hbox1->addWidget(refresh);
@@ -37,8 +40,8 @@ MemoryBrowserWindow::MemoryBrowserWindow(QWidget * parent/*= 0*/): QWidget(paren
 	// Need to set the size as well...
 //	resize(560, 480);
 
-//	QFont fixedFont("Lucida Console", 8, QFont::Normal);
-	QFont fixedFont("", 8, QFont::Normal);
+	QFont fixedFont("Lucida Console", 8, QFont::Normal);
+//	QFont fixedFont("", 8, QFont::Normal);
 	fixedFont.setStyleHint(QFont::TypeWriter);
 	text->setFont(fixedFont);
 ////	layout->setSizeConstraint(QLayout::SetFixedSize);
@@ -79,7 +82,7 @@ void MemoryBrowserWindow::RefreshContents(void)
 			if (c == 0x20)
 				sprintf(buf, "&nbsp;");
 
-			if ((c < 0x20) || ((c > 0x7F) && (c < 0xA0)))
+			if ((c < 0x20) || (c > 0x7E))
 				sprintf(buf, ".");
 
 			strcat(string, buf);

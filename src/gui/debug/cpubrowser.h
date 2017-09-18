@@ -8,7 +8,7 @@
 #ifndef __CPUBROWSER_H__
 #define __CPUBROWSER_H__
 
-#include <QtGui>
+#include <QtWidgets>
 #include <stdint.h>
 
 class CPUBrowserWindow: public QWidget
@@ -24,6 +24,7 @@ class CPUBrowserWindow: public QWidget
 		void RefreshContents(void);
 		void HandleBPM(bool);
 		void HandleBPMAddress(const QString &);
+		void HandleBPMContinue(void);
 
 	protected:
 		void keyPressEvent(QKeyEvent *);
@@ -35,6 +36,7 @@ class CPUBrowserWindow: public QWidget
 		QPushButton * refresh;
 		QCheckBox * bpm;
 		QLineEdit * bpmAddress;
+		QPushButton * bpmContinue;
 
 //		int32_t memBase;
 };

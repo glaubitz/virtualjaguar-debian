@@ -30,10 +30,11 @@ endif
 # Set vars for libcdio
 ifneq "$(shell pkg-config --silence-errors --libs libcdio)" ""
 HAVECDIO := -DHAVE_LIB_CDIO
-CDIOLIB  := -lcdio
+#This is the wrong place for this...
+#CDIOLIB  := -lcdio
 else
 HAVECDIO :=
-CDIOLIB  :=
+#CDIOLIB  :=
 endif
 
 CC      := $(CROSS)gcc
@@ -42,7 +43,7 @@ AR      := $(CROSS)ar
 ARFLAGS := -rs
 
 SDL_CFLAGS = `$(CROSS)sdl-config --cflags`
-DEFINES = -D$(SYSTYPE)
+DEFINES = -D$(SYSTYPE) $(HAVECDIO)
 GCC_DEPS = -MMD
 
 INCS := -I./src
@@ -71,6 +72,7 @@ OBJS := \
 	obj/joystick.o     \
 	obj/log.o          \
 	obj/memory.o       \
+	obj/memtrack.o     \
 	obj/mmu.o          \
 	obj/op.o           \
 	obj/settings.o     \
@@ -100,3 +102,4 @@ obj/%.o: src/%.cpp
 	$(Q)$(CC) $(GCC_DEPS) $(CXXFLAGS) $(SDL_CFLAGS) $(DEFINES) $(INCS) -c $< -o $@
 
 -include obj/*.d
+

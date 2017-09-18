@@ -7,7 +7,7 @@
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  -----------------------------------------------------------
 // JLH  01/16/2010  Created this log ;-)
 //
 
@@ -17,7 +17,6 @@
 // to Curt. ;-) Without that excellent documentation which shows *exactly*
 // what's going on inside the TOM chip, we'd all still be guessing as to how
 // the wily blitter and other pieces of the Jaguar puzzle actually work.
-// Now how about those JERRY ASIC nets gentlemen...? [We have those now!] ;-)
 //
 
 #include "blitter.h"

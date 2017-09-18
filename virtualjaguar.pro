@@ -16,9 +16,9 @@
 TARGET     = virtualjaguar
 CONFIG    += qt warn_on release
 # debug
-RESOURCES += virtualjaguar.qrc
+RESOURCES += src/gui/virtualjaguar.qrc
 LIBS      += -Lobj -Lsrc/m68000/obj -ljaguarcore -lz -lm68k
-QT        += opengl
+QT        += opengl widgets
 
 # We stuff all the intermediate crap into obj/ so it won't confuse us mere
 # mortals ;-)
@@ -35,6 +35,12 @@ else:unix { DEFINES += __GCCUNIX__ }
 # SDL (to link statically on Mac)
 macx { LIBS += `sdl-config --static-libs` }
 else { LIBS += `$(CROSS)sdl-config --libs` }
+
+# libCDIO (may or may not be cross compatible, so we have this for now, just in
+# case we need it... (N.B.: the $(CDIO) is needed because under MXE, qmake
+# changes libcdio to -lcdio for some stupid reason...)
+macx { LIBS += `pkg-config --silence-errors --libs libcdio` }
+else { LIBS += `$(CROSS)pkg-config --silence-errors --libs $(CDIO)` }
 
 # Icon on Win32, Mac
 #win32 { LIBS += res/vj-ico.o }
@@ -54,6 +60,8 @@ QMAKE_CXXFLAGS += `$(CROSS)sdl-config --cflags`
 
 # Translations. NB: Nobody has stepped up to do any :-P so these are dummy
 # translations
+# Removed for now, they interfere with proper running in non-English locales for
+# some reason. :-/
 #TRANSLATIONS = \
 #	virtualjaguar_fr.ts \
 #	virtualjaguar_gr.ts

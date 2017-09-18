@@ -30,7 +30,7 @@
 //
 
 #include "profile.h"
-#include <QtGui>
+#include <QtWidgets>
 #include "gamepad.h"
 #include "log.h"
 #include "settings.h"
@@ -97,7 +97,7 @@ void ReadProfiles(QSettings * set)
 	for(int i=1; i<numberOfDevices; i++)
 	{
 		set->setArrayIndex(i - 1);
-		strcpy(deviceNames[i], set->value("deviceName").toString().toAscii().data());
+		strcpy(deviceNames[i], set->value("deviceName").toString().toUtf8().data());
 #ifdef DEBUG_PROFILES
 printf("Read device name: %s\n", deviceNames[i]);
 #endif
@@ -113,7 +113,7 @@ printf("Number of profiles: %u\n", numberOfProfiles);
 	{
 		set->setArrayIndex(i);
 		profile[i].device = set->value("deviceNum").toInt();
-		strcpy(profile[i].mapName, set->value("mapName").toString().toAscii().data());
+		strcpy(profile[i].mapName, set->value("mapName").toString().toUtf8().data());
 		profile[i].preferredSlot = set->value("preferredSlot").toInt();
 
 		for(int j=0; j<21; j++)
@@ -371,7 +371,12 @@ void AutoConnectProfiles(void)
 	// add it in.
 	if (Gamepad::numJoysticks == 0)
 	{
-		ConnectProfileToDevice(0);
+#ifdef DEBUG_PROFILES
+printf("AutoConnect: Setting up keyboard...\n");
+#endif
+//NO!		ConnectProfileToDevice(0);
+#warning "!!! Need to set up scanning for multiple keyboard profiles !!!"
+		ConnectProfileToController(0, 0);
 		return;
 	}
 
@@ -382,6 +387,9 @@ void AutoConnectProfiles(void)
 	{
 		int deviceNum = FindDeviceNumberForName(Gamepad::GetJoystickName(i));
 //		bool p1Overwriteable = 
+#ifdef DEBUG_PROFILES
+printf("AutoConnect: Attempting to set up profile for device '%s' (%i)\n", Gamepad::GetJoystickName(i), deviceNum);
+#endif
 
 		for(int j=0; j<numberOfProfiles; j++)
 		{
@@ -449,6 +457,9 @@ void AutoConnectProfiles(void)
 	// N.B.: The keyboard is always mapped to profile #0, so we can locate it
 	//       easily. :-)
 	int slot = profile[0].preferredSlot;
+#ifdef DEBUG_PROFILES
+printf("AutoConnect: Attempting to connect keyboard... (gamepadIDSlot1/2 = %i/%i)\n", gamepadIDSlot1, gamepadIDSlot2);
+#endif
 
 	if ((slot == CONTROLLER1) && (gamepadIDSlot1 == -1))
 		controller1Profile = 0;
@@ -462,12 +473,16 @@ void AutoConnectProfiles(void)
 			controller2Profile = 0;
 	}
 
+#ifdef DEBUG_PROFILES
+printf("AutoConnect: Profiles found: [%i, %i]\n", controller1Profile, controller2Profile);
+#endif
 	// Finally, attempt to connect profiles to controllers
 	ConnectProfileToController(controller1Profile, 0);
 	ConnectProfileToController(controller2Profile, 1);
 }
 
 
+//unused...
 int ConnectProfileToDevice(int deviceNum, int gamepadID/*= -1*/)
 {
 //	bool found1 = false;

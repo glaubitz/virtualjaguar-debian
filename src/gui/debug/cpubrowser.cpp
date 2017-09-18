@@ -7,7 +7,7 @@
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  -----------------------------------------------------------
 // JLH  08/14/2012  Created this file
 //
 
@@ -25,9 +25,13 @@
 CPUBrowserWindow::CPUBrowserWindow(QWidget * parent/*= 0*/): QWidget(parent, Qt::Dialog),
 	layout(new QVBoxLayout), text(new QLabel),
 	refresh(new QPushButton(tr("Refresh"))),
-	bpm(new QCheckBox(tr("BPM"))), bpmAddress(new QLineEdit)
+	bpm(new QCheckBox(tr("BPM"))), bpmAddress(new QLineEdit),
+	bpmContinue(new QPushButton(tr("Resume")))
 {
 	setWindowTitle(tr("CPU Browser"));
+
+	// Make label text selectable
+	text->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
 	// Need to set the size as well...
 //	resize(560, 480);
@@ -37,9 +41,10 @@ CPUBrowserWindow::CPUBrowserWindow(QWidget * parent/*= 0*/): QWidget(parent, Qt:
 	QHBoxLayout * hbox1 = new QHBoxLayout;
 	hbox1->addWidget(bpm);
 	hbox1->addWidget(bpmAddress);
+	hbox1->addWidget(bpmContinue);
 
-//	QFont fixedFont("Lucida Console", 8, QFont::Normal);
-	QFont fixedFont("", 8, QFont::Normal);
+	QFont fixedFont("Lucida Console", 8, QFont::Normal);
+//	QFont fixedFont("", 8, QFont::Normal);
 	fixedFont.setStyleHint(QFont::TypeWriter);
 	text->setFont(fixedFont);
 ////	layout->setSizeConstraint(QLayout::SetFixedSize);
@@ -52,6 +57,7 @@ CPUBrowserWindow::CPUBrowserWindow(QWidget * parent/*= 0*/): QWidget(parent, Qt:
 	connect(refresh, SIGNAL(clicked()), this, SLOT(RefreshContents()));
 	connect(bpm, SIGNAL(clicked(bool)), this, SLOT(HandleBPM(bool)));
 	connect(bpmAddress, SIGNAL(textChanged(const QString &)), this, SLOT(HandleBPMAddress(const QString &)));
+	connect(bpmContinue, SIGNAL(clicked()), this, SLOT(HandleBPMContinue()));
 }
 
 
@@ -257,6 +263,12 @@ void CPUBrowserWindow::HandleBPMAddress(const QString & newText)
 {
 	bool ok;
 	bpmAddress1 = newText.toUInt(&ok, 16);
+}
+
+
+void CPUBrowserWindow::HandleBPMContinue(void)
+{
+	M68KDebugResume();
 }
 
 

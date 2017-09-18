@@ -32,6 +32,7 @@
 #include "log.h"
 #include "m68000/m68kinterface.h"
 //#include "memory.h"
+#include "memtrack.h"
 #include "mmu.h"
 #include "settings.h"
 #include "tom.h"
@@ -97,6 +98,7 @@ uint32_t d4Queue[0x400];
 uint32_t d5Queue[0x400];
 uint32_t d6Queue[0x400];
 uint32_t d7Queue[0x400];
+uint32_t srQueue[0x400];
 uint32_t pcQPtr = 0;
 bool startM68KTracing = false;
 
@@ -177,18 +179,19 @@ if (inRoutine)
 	d5Queue[pcQPtr] = m68k_get_reg(NULL, M68K_REG_D5);
 	d6Queue[pcQPtr] = m68k_get_reg(NULL, M68K_REG_D6);
 	d7Queue[pcQPtr] = m68k_get_reg(NULL, M68K_REG_D7);
+	srQueue[pcQPtr] = m68k_get_reg(NULL, M68K_REG_SR);
 	pcQPtr++;
 	pcQPtr &= 0x3FF;
 
 	if (m68kPC & 0x01)		// Oops! We're fetching an odd address!
 	{
-		WriteLog("M68K: Attempted to execute from an odd adress!\n\nBacktrace:\n\n");
+		WriteLog("M68K: Attempted to execute from an odd address!\n\nBacktrace:\n\n");
 
 		static char buffer[2048];
 		for(int i=0; i<0x400; i++)
 		{
 //			WriteLog("[A2=%08X, D0=%08X]\n", a2Queue[(pcQPtr + i) & 0x3FF], d0Queue[(pcQPtr + i) & 0x3FF]);
-			WriteLog("[A0=%08X, A1=%08X, A2=%08X, A3=%08X, A4=%08X, A5=%08X, A6=%08X, A7=%08X, D0=%08X, D1=%08X, D2=%08X, D3=%08X, D4=%08X, D5=%08X, D6=%08X, D7=%08X]\n", a0Queue[(pcQPtr + i) & 0x3FF], a1Queue[(pcQPtr + i) & 0x3FF], a2Queue[(pcQPtr + i) & 0x3FF], a3Queue[(pcQPtr + i) & 0x3FF], a4Queue[(pcQPtr + i) & 0x3FF], a5Queue[(pcQPtr + i) & 0x3FF], a6Queue[(pcQPtr + i) & 0x3FF], a7Queue[(pcQPtr + i) & 0x3FF], d0Queue[(pcQPtr + i) & 0x3FF], d1Queue[(pcQPtr + i) & 0x3FF], d2Queue[(pcQPtr + i) & 0x3FF], d3Queue[(pcQPtr + i) & 0x3FF], d4Queue[(pcQPtr + i) & 0x3FF], d5Queue[(pcQPtr + i) & 0x3FF], d6Queue[(pcQPtr + i) & 0x3FF], d7Queue[(pcQPtr + i) & 0x3FF]);
+			WriteLog("[A0=%08X, A1=%08X, A2=%08X, A3=%08X, A4=%08X, A5=%08X, A6=%08X, A7=%08X, D0=%08X, D1=%08X, D2=%08X, D3=%08X, D4=%08X, D5=%08X, D6=%08X, D7=%08X, SR=%04X]\n", a0Queue[(pcQPtr + i) & 0x3FF], a1Queue[(pcQPtr + i) & 0x3FF], a2Queue[(pcQPtr + i) & 0x3FF], a3Queue[(pcQPtr + i) & 0x3FF], a4Queue[(pcQPtr + i) & 0x3FF], a5Queue[(pcQPtr + i) & 0x3FF], a6Queue[(pcQPtr + i) & 0x3FF], a7Queue[(pcQPtr + i) & 0x3FF], d0Queue[(pcQPtr + i) & 0x3FF], d1Queue[(pcQPtr + i) & 0x3FF], d2Queue[(pcQPtr + i) & 0x3FF], d3Queue[(pcQPtr + i) & 0x3FF], d4Queue[(pcQPtr + i) & 0x3FF], d5Queue[(pcQPtr + i) & 0x3FF], d6Queue[(pcQPtr + i) & 0x3FF], d7Queue[(pcQPtr + i) & 0x3FF], srQueue[(pcQPtr + i) & 0x3FF]);
 			m68k_disassemble(buffer, pcQueue[(pcQPtr + i) & 0x3FF], 0);//M68K_CPU_TYPE_68000);
 			WriteLog("\t%08X: %s\n", pcQueue[(pcQPtr + i) & 0x3FF], buffer);
 		}
@@ -1003,10 +1006,12 @@ int irq_ack_handler(int level)
 	// IPL1 is connected to INTL on TOM (OUT to 68K)
 	// IPL0-2 are also tied to Vcc via 4.7K resistors!
 	// (DINT on TOM goes into DINT on JERRY (IN Tom from Jerry))
-	// There doesn't seem to be any other path to IPL0 or 2 on the schematic, which means
-	// that *all* IRQs to the 68K are routed thru TOM at level 2. Which means they're all maskable.
+	// There doesn't seem to be any other path to IPL0 or 2 on the schematic,
+	// which means that *all* IRQs to the 68K are routed thru TOM at level 2.
+	// Which means they're all maskable.
 
-	// The GPU/DSP/etc are probably *not* issuing an NMI, but it seems to work OK...
+	// The GPU/DSP/etc are probably *not* issuing an NMI, but it seems to work
+	// OK...
 	// They aren't, and this causes problems with a, err, specific ROM. :-D
 
 	if (level == 2)
@@ -1057,8 +1062,9 @@ unsigned int m68k_read_memory_8(unsigned int address)
 //		retVal = jaguarBootROM[address - 0xE00000];
 //		retVal = jaguarDevBootROM1[address - 0xE00000];
 		retVal = jagMemSpace[address];
-	else if ((address >= 0xDFFF00) && (address <= 0xDFFFFF))
-		retVal = CDROMReadByte(address);
+//hmm...
+//	else if ((address >= 0xDFFF00) && (address <= 0xDFFFFF))
+//		retVal = CDROMReadByte(address);
 	else if ((address >= 0xF00000) && (address <= 0xF0FFFF))
 		retVal = TOMReadByte(address, M68K);
 	else if ((address >= 0xF10000) && (address <= 0xF1FFFF))
@@ -1159,7 +1165,16 @@ unsigned int m68k_read_memory_16(unsigned int address)
 		retVal = GET16(jaguarMainRAM, address);
 //	else if ((address >= 0x800000) && (address <= 0xDFFFFE))
 	else if ((address >= 0x800000) && (address <= 0xDFFEFE))
-		retVal = (jaguarMainROM[address - 0x800000] << 8) | jaguarMainROM[address - 0x800000 + 1];
+	{
+		// Memory Track reading...
+		if (((TOMGetMEMCON1() & 0x0006) == (2 << 1)) && (jaguarMainROMCRC32 == 0xFDF37F47))
+		{
+			retVal = MTReadWord(address);
+		}
+		else
+			retVal = (jaguarMainROM[address - 0x800000] << 8)
+				| jaguarMainROM[address - 0x800000 + 1];
+	}
 	else if ((address >= 0xE00000) && (address <= 0xE3FFFE))
 //		retVal = (jaguarBootROM[address - 0xE00000] << 8) | jaguarBootROM[address - 0xE00000 + 1];
 //		retVal = (jaguarDevBootROM1[address - 0xE00000] << 8) | jaguarDevBootROM1[address - 0xE00000 + 1];
@@ -1204,7 +1219,20 @@ unsigned int m68k_read_memory_32(unsigned int address)
 
 //WriteLog("--> [RM32]\n");
 #ifndef USE_NEW_MMU
-    return (m68k_read_memory_16(address) << 16) | m68k_read_memory_16(address + 2);
+	uint32_t retVal = 0;
+
+	if ((address >= 0x800000) && (address <= 0xDFFEFE))
+	{
+		// Memory Track reading...
+		if (((TOMGetMEMCON1() & 0x0006) == (2 << 1)) && (jaguarMainROMCRC32 == 0xFDF37F47))
+			retVal = MTReadLong(address);
+		else
+			retVal = GET32(jaguarMainROM, address - 0x800000);
+
+		return retVal;
+	}
+
+	return (m68k_read_memory_16(address) << 16) | m68k_read_memory_16(address + 2);
 #else
 	return MMURead32(address, M68K);
 #endif
@@ -1254,8 +1282,9 @@ void m68k_write_memory_8(unsigned int address, unsigned int value)
 	// Note that the Jaguar only has 2M of RAM, not 4!
 	if ((address >= 0x000000) && (address <= 0x1FFFFF))
 		jaguarMainRAM[address] = value;
-	else if ((address >= 0xDFFF00) && (address <= 0xDFFFFF))
-		CDROMWriteByte(address, value, M68K);
+//hmm...
+//	else if ((address >= 0xDFFF00) && (address <= 0xDFFFFF))
+//		CDROMWriteByte(address, value, M68K);
 	else if ((address >= 0xF00000) && (address <= 0xF0FFFF))
 		TOMWriteByte(address, value, M68K);
 	else if ((address >= 0xF10000) && (address <= 0xF1FFFF))
@@ -1341,6 +1370,12 @@ if (address == 0xF02110)
 /*		jaguar_mainRam[address] = value >> 8;
 		jaguar_mainRam[address + 1] = value & 0xFF;*/
 		SET16(jaguarMainRAM, address, value);
+	}
+	// Memory Track device writes....
+	else if ((address >= 0x800000) && (address <= 0x87FFFE))
+	{
+		if (((TOMGetMEMCON1() & 0x0006) == (2 << 1)) && (jaguarMainROMCRC32 == 0xFDF37F47))
+			MTWriteWord(address, value);
 	}
 	else if ((address >= 0xDFFF00) && (address <= 0xDFFFFE))
 		CDROMWriteWord(address, value, M68K);
@@ -1474,8 +1509,9 @@ void M68K_show_context(void)
 // Unknown read/write byte/word routines
 //
 
-// It's hard to believe that developers would be sloppy with their memory writes, yet in
-// some cases the developers screwed up royal. E.g., Club Drive has the following code:
+// It's hard to believe that developers would be sloppy with their memory
+// writes, yet in some cases the developers screwed up royal. E.g., Club Drive
+// has the following code:
 //
 // 807EC4: movea.l #$f1b000, A1
 // 807ECA: movea.l #$8129e0, A0
@@ -1486,9 +1522,10 @@ void M68K_show_context(void)
 // 807EDC: move.l  (A0)+, (A1)+
 // 807EDE: dbra    D1, 807edc
 //
-// The problem is at $807ED0--instead of putting A0 into D0, they really meant to put A1
-// in. This mistake causes it to try and overwrite approximately $700000 worth of address
-// space! (That is, unless the 68K causes a bus error...)
+// The problem is at $807ED0--instead of putting A0 into D0, they really meant
+// to put A1 in. This mistake causes it to try and overwrite approximately
+// $700000 worth of address space! (That is, unless the 68K causes a bus
+// error...)
 
 void jaguar_unknown_writebyte(unsigned address, unsigned data, uint32_t who/*=UNKNOWN*/)
 {
@@ -1606,8 +1643,9 @@ uint8_t JaguarReadByte(uint32_t offset, uint32_t who/*=UNKNOWN*/)
 		data = jaguarMainRAM[offset & 0x1FFFFF];
 	else if ((offset >= 0x800000) && (offset < 0xDFFF00))
 		data = jaguarMainROM[offset - 0x800000];
-	else if ((offset >= 0xDFFF00) && (offset <= 0xDFFFFF))
-		data = CDROMReadByte(offset, who);
+// Hmm...
+//	else if ((offset >= 0xDFFF00) && (offset <= 0xDFFFFF))
+//		data = CDROMReadByte(offset, who);
 	else if ((offset >= 0xE00000) && (offset < 0xE40000))
 //		data = jaguarBootROM[offset & 0x3FFFF];
 //		data = jaguarDevBootROM1[offset & 0x3FFFF];
@@ -1655,6 +1693,10 @@ uint16_t JaguarReadWord(uint32_t offset, uint32_t who/*=UNKNOWN*/)
 
 void JaguarWriteByte(uint32_t offset, uint8_t data, uint32_t who/*=UNKNOWN*/)
 {
+/*	if ((offset & 0x1FFFFF) >= 0xE00 && (offset & 0x1FFFFF) < 0xE18)
+	{
+		WriteLog("JWB: Byte %02X written at %08X by %s\n", data, offset, whoName[who]);
+	}//*/
 /*	if (offset >= 0x4E00 && offset < 0x4E04)
 		WriteLog("JWB: Byte %02X written at %08X by %s\n", data, offset, whoName[who]);//*/
 //Need to check for writes in the range of $18FA70 + 8000...
@@ -1670,11 +1712,12 @@ void JaguarWriteByte(uint32_t offset, uint8_t data, uint32_t who/*=UNKNOWN*/)
 		jaguarMainRAM[offset & 0x1FFFFF] = data;
 		return;
 	}
-	else if ((offset >= 0xDFFF00) && (offset <= 0xDFFFFF))
-	{
-		CDROMWriteByte(offset, data, who);
-		return;
-	}
+//hmm...
+//	else if ((offset >= 0xDFFF00) && (offset <= 0xDFFFFF))
+//	{
+//		CDROMWriteByte(offset, data, who);
+//		return;
+//	}
 	else if ((offset >= 0xF00000) && (offset <= 0xF0FFFF))
 	{
 		TOMWriteByte(offset, data, who);
@@ -1693,6 +1736,11 @@ void JaguarWriteByte(uint32_t offset, uint8_t data, uint32_t who/*=UNKNOWN*/)
 uint32_t starCount;
 void JaguarWriteWord(uint32_t offset, uint16_t data, uint32_t who/*=UNKNOWN*/)
 {
+/*	if ((offset & 0x1FFFFF) >= 0xE00 && (offset & 0x1FFFFF) < 0xE18)
+	{
+		WriteLog("JWW: Word %04X written at %08X by %s\n", data, offset, whoName[who]);
+		WriteLog("     GPU PC = $%06X\n", GPUReadLong(0xF02110, DEBUG));
+	}//*/
 /*	if (offset >= 0x4E00 && offset < 0x4E04)
 		WriteLog("JWW: Word %04X written at %08X by %s\n", data, offset, whoName[who]);//*/
 /*if (offset == 0x0100)//64*4)
@@ -1917,12 +1965,20 @@ void JaguarReset(void)
 //Need to change this so it uses the single RAM space and load the BIOS
 //into it somewhere...
 //Also, have to change this here and in JaguarReadXX() currently
+#if 0
 	// Only use the system BIOS if it's available...! (it's always available now!)
 	// AND only if a jaguar cartridge has been inserted.
 	if (vjs.useJaguarBIOS && jaguarCartInserted && !vjs.hardwareTypeAlpine)
 		memcpy(jaguarMainRAM, jagMemSpace + 0xE00000, 8);
 	else
 		SET32(jaguarMainRAM, 4, jaguarRunAddress);
+#else
+	// Let's simplify this...
+	if (!vjs.useJaguarBIOS)
+		SET32(jaguarMainRAM, 4, jaguarRunAddress);
+	else
+		memcpy(jaguarMainRAM, jagMemSpace + 0xE00000, 8);
+#endif
 
 //	WriteLog("jaguar_reset():\n");
 	TOMReset();
@@ -2131,14 +2187,13 @@ void JaguarExecuteNew(void)
 }
 
 
-#define USE_CORRECT_PAL_TIMINGS
-// A lot of confusion comes from here...
-// The thing to keep in mind is that the VC is advanced every HALF line, regardless
-// of whether the display is interlaced or not. The only difference with an
-// interlaced display is that the high bit of VC will be set when the lower
-// field is being rendered. (NB: The high bit of VC is ALWAYS set on the lower field,
-// regardless of whether it's in interlace mode or not.
-// NB2: Seems it doens't always, not sure what the constraint is...)
+//
+// The thing to keep in mind is that the VC is advanced every HALF line,
+// regardless of whether the display is interlaced or not. The only difference
+// with an interlaced display is that the high bit of VC will be set when the
+// lower field is being rendered. (NB: The high bit of VC is ALWAYS set on the
+// lower field, regardless of whether it's in interlace mode or not.
+// NB2: Seems it doesn't always, not sure what the constraint is...)
 //
 // Normally, TVs will render a full frame in 1/30s (NTSC) or 1/25s (PAL) by
 // rendering two fields that are slighty vertically offset from each other.
@@ -2149,46 +2204,37 @@ void JaguarExecuteNew(void)
 // We execute a half frame in each timeslice (1/60s NTSC, 1/50s PAL).
 // Since the number of lines in a FULL frame is 525 for NTSC, 625 for PAL,
 // it will be half this number for a half frame. BUT, since we're counting
-// HALF lines, we double this number and we're back at 525 for NTSC, 625 for PAL.
+// HALF lines, we double this number and we're back at 525 for NTSC, 625 for
+// PAL.
 //
 // Scanline times are 63.5555... μs in NTSC and 64 μs in PAL
 // Half line times are, naturally, half of this. :-P
+//
 void HalflineCallback(void)
 {
-//OK, this is hardwired to run in NTSC, and for who knows how long.
-//Need to fix this so that it does a half-line in the correct amount of time
-//and number of lines, depending on which mode we're in. [FIXED]
 	uint16_t vc = TOMReadWord(0xF00006, JAGUAR);
 	uint16_t vp = TOMReadWord(0xF0003E, JAGUAR) + 1;
 	uint16_t vi = TOMReadWord(0xF0004E, JAGUAR);
 //	uint16_t vbb = TOMReadWord(0xF00040, JAGUAR);
 	vc++;
 
-#ifdef USE_CORRECT_PAL_TIMINGS
 	// Each # of lines is for a full frame == 1/30s (NTSC), 1/25s (PAL).
 	// So we cut the number of half-lines in a frame in half. :-P
 	uint16_t numHalfLines = ((vjs.hardwareTypeNTSC ? 525 : 625) * 2) / 2;
 
 	if ((vc & 0x7FF) >= numHalfLines)
-#else
-	if ((vc & 0x7FF) >= vp)
-#endif
 	{
-		vc = 0;
-//		lowerField = !lowerField;
-
-		// If we're rendering the lower field, set the high bit (#12, counting
-		// from 1) of VC
-		if (lowerField)
-			vc = 0x0800;
+		lowerField = !lowerField;
+		// If we're rendering the lower field, set the high bit (#11, counting
+		// from 0) of VC
+		vc = (lowerField ? 0x0800 : 0x0000);
 	}
 
-//WriteLog("SLC: Currently on line %u (VP=%u)...\n", vc, vp);
+//WriteLog("HLC: Currently on line %u (VP=%u)...\n", vc, vp);
 	TOMWriteWord(0xF00006, vc, JAGUAR);
 
-//This is a crappy kludge, but maybe it'll work for now...
-//Maybe it's not so bad, since the IRQ happens on a scanline boundary...
-	if ((vc & 0x7FF) == vi && (vc & 0x7FF) > 0 && TOMIRQEnabled(IRQ_VIDEO))	// Time for Vertical Interrupt?
+	// Time for Vertical Interrupt?
+	if ((vc & 0x7FF) == vi && (vc & 0x7FF) > 0 && TOMIRQEnabled(IRQ_VIDEO))
 	{
 		// We don't have to worry about autovectors & whatnot because the Jaguar
 		// tells you through its HW registers who sent the interrupt...
@@ -2207,22 +2253,6 @@ void HalflineCallback(void)
 		frameDone = true;
 	}//*/
 
-#ifdef USE_CORRECT_PAL_TIMINGS
 	SetCallbackTime(HalflineCallback, (vjs.hardwareTypeNTSC ? 31.777777777 : 32.0));
-#else
-//	SetCallbackTime(HalflineCallback, 63.5555);
-	SetCallbackTime(HalflineCallback, 31.77775);
-#endif
 }
 
-
-// This isn't currently used, but maybe it should be...
-/*
-Nah, the scanline based code is good enough, and runs in 1 frame. The GUI
-handles all the rest, so this isn't needed. :-P
-*/
-void RenderCallback(void)
-{
-//	SetCallbackTime(RenderCallback, 33303.082);	// # Scanlines * scanline time
-	SetCallbackTime(RenderCallback, 16651.541);	// # Scanlines * scanline time
-}

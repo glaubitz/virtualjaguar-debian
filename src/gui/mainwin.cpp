@@ -56,6 +56,7 @@
 #include "debug/riscdasmbrowser.h"
 
 #include "dac.h"
+#include "eeprom.h"
 #include "jaguar.h"
 #include "log.h"
 #include "file.h"
@@ -139,18 +140,15 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 	powerRed.addFile(":/res/power-off.png", QSize(), QIcon::Normal, QIcon::Off);
 	powerRed.addFile(":/res/power-on-red.png", QSize(), QIcon::Normal, QIcon::On);
 
-//	powerAct = new QAction(QIcon(":/res/power.png"), tr("&Power"), this);
 	powerAct = new QAction(powerGreen, tr("&Power"), this);
 	powerAct->setStatusTip(tr("Powers Jaguar on/off"));
 	powerAct->setCheckable(true);
 	powerAct->setChecked(false);
-//	powerAct->setDisabled(true);
 	connect(powerAct, SIGNAL(triggered()), this, SLOT(TogglePowerState()));
 
 	QIcon pauseIcon;
 	pauseIcon.addFile(":/res/pause-off", QSize(), QIcon::Normal, QIcon::Off);
 	pauseIcon.addFile(":/res/pause-on", QSize(), QIcon::Normal, QIcon::On);
-//	pauseAct = new QAction(QIcon(":/res/pause.png"), tr("Pause"), this);
 	pauseAct = new QAction(pauseIcon, tr("Pause"), this);
 	pauseAct->setStatusTip(tr("Toggles the running state"));
 	pauseAct->setCheckable(true);
@@ -188,7 +186,10 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 	palAct->setCheckable(true);
 	connect(palAct, SIGNAL(triggered()), this, SLOT(SetPAL()));
 
-	blurAct = new QAction(QIcon(":/res/blur.png"), tr("Blur"), this);
+	blur.addFile(":/res/blur-off.png", QSize(), QIcon::Normal, QIcon::Off);
+	blur.addFile(":/res/blur-on.png", QSize(), QIcon::Normal, QIcon::On);
+
+	blurAct = new QAction(blur, tr("Blur"), this);
 	blurAct->setStatusTip(tr("Sets OpenGL rendering to GL_NEAREST"));
 	blurAct->setCheckable(true);
 	connect(blurAct, SIGNAL(triggered()), this, SLOT(ToggleBlur()));
@@ -323,11 +324,12 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 	addAction(frameAdvanceAct);
 
 	//	Create status bar
+	indicator = new QLabel(tr("DSP: <b>ON</>"));
+	statusBar()->addPermanentWidget(indicator);
 	statusBar()->showMessage(tr("Ready"));
-
 	ReadSettings();
-
-	// Do this in case original size isn't correct (mostly for the first-run case)
+	// Do this in case original size isn't correct (mostly for the first-run
+	// case)
 	ResizeMainWindow();
 
 	// Create our test pattern bitmaps
@@ -384,13 +386,16 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 	if (autoRun)
 		return;
 
+#define TESTING_CD_BIOS
 	// Load up the default ROM if in Alpine mode:
 	if (vjs.hardwareTypeAlpine)
 	{
+#ifndef TESTING_CD_BIOS
 		bool romLoaded = JaguarLoadFile(vjs.alpineROMPath);
 
 		// If regular load failed, try just a straight file load
-		// (Dev only! I don't want people to start getting lazy with their releases again! :-P)
+		// (Dev only! I don't want people to start getting lazy with their
+		// releases again! :-P)
 		if (!romLoaded)
 			romLoaded = AlpineLoadFile(vjs.alpineROMPath);
 
@@ -402,6 +407,7 @@ MainWin::MainWin(bool autoRun): running(true), powerButtonOn(false),
 		// Attempt to load/run the ABS file...
 		LoadSoftware(vjs.absROMPath);
 		memcpy(jagMemSpace + 0xE00000, jaguarDevBootROM2, 0x20000);	// Use the stub BIOS
+#endif
 		// Prevent the scanner from running...
 		return;
 	}
@@ -436,9 +442,17 @@ void MainWin::SyncUI(void)
 	fullScreen = vjs.fullscreen;
 	SetFullScreen(fullScreen);
 
+	// Set our DSP indicator
+	UpdateIndicator();
+
 	// Reset the timer to be what was set in the command line (if any):
-//	timer->setInterval(vjs.hardwareTypeNTSC ? 16 : 20);
 	timer->start(vjs.hardwareTypeNTSC ? 16 : 20);
+}
+
+
+void MainWin::UpdateIndicator(void)
+{
+	indicator->setText(QString(tr("DSP: %1")).arg(vjs.DSPEnabled ? "<i>ON</i>" : "<b>OFF</b>"));
 }
 
 
@@ -678,6 +692,7 @@ void MainWin::Configure(void)
 	{
 		DACDone();
 		DACInit();
+		UpdateIndicator();
 	}
 
 	// Just in case we crash before a clean exit...
@@ -726,6 +741,21 @@ static uint32_t ntscTickCount;
 		HandleGamepads();
 		JaguarExecuteNew();
 		videoWidget->HandleMouseHiding();
+
+static uint32_t refresh = 0;
+		// Do autorefresh on debug windows
+		// Have to be careful, too much causes the emulator to slow way down!
+		if (vjs.hardwareTypeAlpine)
+		{
+			if (refresh == 60)
+			{
+				memBrowseWin->RefreshContents();
+				cpuBrowseWin->RefreshContents();
+				refresh = 0;
+			}
+			else
+				refresh++;
+		}
 	}
 
 	videoWidget->updateGL();
@@ -810,6 +840,13 @@ void MainWin::TogglePowerState(void)
 // does the expected thing. Otherwise, if we use the file picker to insert a
 // cart, we expect to run the cart! Maybe have a RemoveCart function that only
 // works if the CD unit is active?
+//The CD BIOS looks to see if a cart is present, and tries to boot it if so.
+//so no, we don't need any of that shit.
+			EepromInit();
+			// Set this just in case we're not using the main BIOS...
+//well, this doesn't seem to work regardless. :-P Seems BIOS is mandatory
+//			SET32(jaguarMainRAM, 4, 0x802000);
+			memcpy(jagMemSpace + 0x800000, jaguarCDBootROM, 0x40000);
 			setWindowTitle(QString("Virtual Jaguar " VJ_RELEASE_VERSION
 				" - Now playing: Jaguar CD"));
 		}
@@ -947,10 +984,10 @@ void MainWin::Unpause(void)
 
 void MainWin::LoadSoftware(QString file)
 {
-	running = false;							// Prevent bad things(TM) from happening...
-	pauseForFileSelector = false;				// Reset the file selector pause flag
+	running = false;				// Prevent bad things(TM) from happening...
+	pauseForFileSelector = false;	// Reset the file selector pause flag
 
-	char * biosPointer = jaguarBootROM;
+	uint8_t * biosPointer = jaguarBootROM;
 
 	if (vjs.hardwareTypeAlpine)
 		biosPointer = jaguarDevBootROM2;
@@ -962,8 +999,8 @@ void MainWin::LoadSoftware(QString file)
 	powerButtonOn = false;
 	TogglePowerState();
 	// We have to load our software *after* the Jaguar RESET
-	cartridgeLoaded = JaguarLoadFile(file.toAscii().data());
-	SET32(jaguarMainRAM, 0, 0x00200000);		// Set top of stack...
+	cartridgeLoaded = JaguarLoadFile(file.toUtf8().data());
+	SET32(jaguarMainRAM, 0, 0x00200000);	// Set top of stack...
 
 	// This is icky because we've already done it
 // it gets worse :-P
@@ -974,8 +1011,7 @@ if (!vjs.useJaguarBIOS)
 
 	if (!vjs.hardwareTypeAlpine && !loadAndGo)
 	{
-		QString newTitle = QString("Virtual Jaguar " VJ_RELEASE_VERSION " - Now playing: %1")
-			.arg(filePickWin->GetSelectedPrettyName());
+		QString newTitle = QString("Virtual Jaguar " VJ_RELEASE_VERSION " - Now playing: %1").arg(filePickWin->GetSelectedPrettyName());
 		setWindowTitle(newTitle);
 	}
 }
@@ -985,11 +1021,14 @@ void MainWin::ToggleCDUsage(void)
 {
 	CDActive = !CDActive;
 
+//NO!!
+#if 0
 	// Set up the Jaguar CD for execution, otherwise, clear memory
 	if (CDActive)
 		memcpy(jagMemSpace + 0x800000, jaguarCDBootROM, 0x40000);
 	else
 		memset(jagMemSpace + 0x800000, 0xFF, 0x40000);
+#endif
 }
 
 
@@ -1016,11 +1055,9 @@ void MainWin::SetFullScreen(bool state/*= true*/)
 		if (debugbar)
 			debugbar->hide();
 
-		showFullScreen();
 		// This is needed because the fullscreen may happen on a different
 		// screen than screen 0:
 		int screenNum = QApplication::desktop()->screenNumber(videoWidget);
-//		QRect r = QApplication::desktop()->availableGeometry(screenNum);
 		QRect r = QApplication::desktop()->screenGeometry(screenNum);
 		double targetWidth = (double)VIRTUAL_SCREEN_WIDTH,
 			targetHeight = (double)(vjs.hardwareTypeNTSC ? VIRTUAL_SCREEN_HEIGHT_NTSC : VIRTUAL_SCREEN_HEIGHT_PAL);
@@ -1036,6 +1073,11 @@ void MainWin::SetFullScreen(bool state/*= true*/)
 	}
 	else
 	{
+		// Seems Qt is fussy about this: showNormal() has to go first, or it
+		// will keep the window stuck in a psuedo-fullscreen mode with no way
+		// to get out of it (except closing the app).
+		showNormal();
+
 		// Reset the video widget to windowed mode
 		videoWidget->offset = 0;
 		videoWidget->fullscreen = false;
@@ -1046,7 +1088,6 @@ void MainWin::SetFullScreen(bool state/*= true*/)
 		if (debugbar)
 			debugbar->show();
 
-		showNormal();
 		ResizeMainWindow();
 		move(mainWinPosition);
 	}
@@ -1112,14 +1153,7 @@ void MainWin::ResizeMainWindow(void)
 		}
 	}
 
-	show();
-
-	for(int i=0; i<2; i++)
-	{
-		resize(0, 0);
-		usleep(2000);
-		QApplication::processEvents();
-	}
+	adjustSize();
 }
 
 
@@ -1155,10 +1189,10 @@ void MainWin::ReadSettings(void)
 	vjs.allowWritesToROM = settings.value("writeROM", false).toBool();
 	vjs.biosType         = settings.value("biosType", BT_M_SERIES).toInt();
 	vjs.useFastBlitter   = settings.value("useFastBlitter", false).toBool();
-	strcpy(vjs.EEPROMPath, settings.value("EEPROMs", QDesktopServices::storageLocation(QDesktopServices::DataLocation).append("/eeproms/")).toString().toAscii().data());
-	strcpy(vjs.ROMPath, settings.value("ROMs", QDesktopServices::storageLocation(QDesktopServices::DataLocation).append("/software/")).toString().toAscii().data());
-	strcpy(vjs.alpineROMPath, settings.value("DefaultROM", "").toString().toAscii().data());
-	strcpy(vjs.absROMPath, settings.value("DefaultABS", "").toString().toAscii().data());
+	strcpy(vjs.EEPROMPath, settings.value("EEPROMs", QStandardPaths::writableLocation(QStandardPaths::DataLocation).append("/eeproms/")).toString().toUtf8().data());
+	strcpy(vjs.ROMPath, settings.value("ROMs", QStandardPaths::writableLocation(QStandardPaths::DataLocation).append("/software/")).toString().toUtf8().data());
+	strcpy(vjs.alpineROMPath, settings.value("DefaultROM", "").toString().toUtf8().data());
+	strcpy(vjs.absROMPath, settings.value("DefaultABS", "").toString().toUtf8().data());
 
 WriteLog("MainWin: Paths\n");
 WriteLog("   EEPROMPath = \"%s\"\n", vjs.EEPROMPath);
@@ -1167,6 +1201,7 @@ WriteLog("AlpineROMPath = \"%s\"\n", vjs.alpineROMPath);
 WriteLog("   absROMPath = \"%s\"\n", vjs.absROMPath);
 WriteLog("Pipelined DSP = %s\n", (vjs.usePipelinedDSP ? "ON" : "off"));
 
+#if 0
 	// Keybindings in order of U, D, L, R, C, B, A, Op, Pa, 0-9, #, *
 	vjs.p1KeyBindings[BUTTON_U] = settings.value("p1k_up", Qt::Key_S).toInt();
 	vjs.p1KeyBindings[BUTTON_D] = settings.value("p1k_down", Qt::Key_X).toInt();
@@ -1211,6 +1246,7 @@ WriteLog("Pipelined DSP = %s\n", (vjs.usePipelinedDSP ? "ON" : "off"));
 	vjs.p2KeyBindings[BUTTON_9] = settings.value("p2k_9", Qt::Key_9).toInt();
 	vjs.p2KeyBindings[BUTTON_d] = settings.value("p2k_pound", Qt::Key_Slash).toInt();
 	vjs.p2KeyBindings[BUTTON_s] = settings.value("p2k_star", Qt::Key_Asterisk).toInt();
+#endif
 
 	ReadProfiles(&settings);
 }
@@ -1250,6 +1286,7 @@ void MainWin::WriteSettings(void)
 	settings.setValue("DefaultROM", vjs.alpineROMPath);
 	settings.setValue("DefaultABS", vjs.absROMPath);
 
+#if 0
 	settings.setValue("p1k_up", vjs.p1KeyBindings[BUTTON_U]);
 	settings.setValue("p1k_down", vjs.p1KeyBindings[BUTTON_D]);
 	settings.setValue("p1k_left", vjs.p1KeyBindings[BUTTON_L]);
@@ -1293,6 +1330,7 @@ void MainWin::WriteSettings(void)
 	settings.setValue("p2k_9", vjs.p2KeyBindings[BUTTON_9]);
 	settings.setValue("p2k_pound", vjs.p2KeyBindings[BUTTON_d]);
 	settings.setValue("p2k_star", vjs.p2KeyBindings[BUTTON_s]);
+#endif
 
 	WriteProfiles(&settings);
 }

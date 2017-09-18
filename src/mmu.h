@@ -9,7 +9,6 @@
 #ifndef __MMU_H__
 #define __MMU_H__
 
-//#include "types.h"
 #include "memory.h"
 
 void MMUWrite8(uint32_t address, uint8_t data, uint32_t who = UNKNOWN);

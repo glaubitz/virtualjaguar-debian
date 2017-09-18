@@ -7,7 +7,7 @@
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  ------------------------------------------------------------
 // JLH  01/28/2010  Created this file
 // JLH  02/16/2010  Moved RomIdentifier stuff to its own file
 // JLH  03/02/2010  Added .ZIP file fishing
@@ -17,7 +17,6 @@
 
 #include "filethread.h"
 
-#include <QtGui>
 #include "crc32.h"
 #include "file.h"
 #include "filedb.h"
@@ -87,25 +86,26 @@ printf("FileThread: Aborting!!!\n");
 	}
 }
 
+
 //
 // This handles file identification and ZIP extraction.
 //
 void FileThread::HandleFile(QFileInfo fileInfo)
 {
-	// Really, need to come up with some kind of cacheing scheme here, so we don't
-	// fish through these files every time we run VJ :-P
+	// Really, need to come up with some kind of cacheing scheme here, so we
+	// don't fish through these files every time we run VJ :-P
 #warning "!!! Need to come up with some kind of cacheing scheme here !!!"
-	bool haveZIPFile = (fileInfo.suffix().compare("zip", Qt::CaseInsensitive) == 0
-		? true : false);
+	bool haveZIPFile = (fileInfo.suffix().compare("zip", Qt::CaseInsensitive) == 0 ? true : false);
 	uint32_t fileSize = 0;
 	uint8_t * buffer = NULL;
 
 	if (haveZIPFile)
 	{
-		// ZIP files are special: They contain more than just the software now... ;-)
+		// ZIP files are special: They contain more than just the software
+		// now... ;-)
 		// So now we fish around inside them to pull out the stuff we want.
 		// Probably also need more stringent error checking as well... :-O
-		fileSize = GetFileFromZIP(fileInfo.filePath().toAscii(), FT_SOFTWARE, buffer);
+		fileSize = GetFileFromZIP(fileInfo.filePath().toUtf8(), FT_SOFTWARE, buffer);
 
 		if (fileSize == 0)
 			return;
@@ -154,16 +154,16 @@ void FileThread::HandleFile(QFileInfo fileInfo)
 	else if ((index != 0xFFFFFFFF) && romList[index].flags & FF_BIOS)
 		return;
 
-//Here's a little problem. When we create the image here and pass it off to FilePicker,
-//we can clobber this image before we have a chance to copy it out in the FilePicker function
-//because we can be back here before FilePicker can respond.
-// So now we create the image on the heap, problem solved. :-)
+//Here's a little problem. When we create the image here and pass it off to
+//FilePicker, we can clobber this image before we have a chance to copy it out
+//in the FilePicker function because we can be back here before FilePicker can
+//respond. So now we create the image on the heap, problem solved. :-)
 	QImage * img = NULL;
 
 	// See if we can fish out a label. :-)
 	if (haveZIPFile)
 	{
-		uint32_t size = GetFileFromZIP(fileInfo.filePath().toAscii(), FT_LABEL, buffer);
+		uint32_t size = GetFileFromZIP(fileInfo.filePath().toUtf8(), FT_LABEL, buffer);
 //printf("FT: Label size = %u bytes.\n", size);
 
 		if (size > 0)
@@ -182,6 +182,7 @@ void FileThread::HandleFile(QFileInfo fileInfo)
 	emit FoundAFile3(index, fileInfo.canonicalFilePath(), img, fileSize, foundUniversalHeader, fileType, crc);
 }
 
+
 //
 // Find a CRC in the ROM list (simple brute force algorithm).
 // If it's there, return the index, otherwise return $FFFFFFFF
@@ -199,3 +200,4 @@ uint32_t FileThread::FindCRCIndexInFileList(uint32_t crc)
 
 	return 0xFFFFFFFF;
 }
+

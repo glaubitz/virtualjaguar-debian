@@ -29,6 +29,8 @@ N.B.: Jaguar RAM is only 2 megs. ROM is 6 megs max, IO is 128K
 
 #include "memory.h"
 
+// N.B.: 6M of RAM is wasted in this arrangement (main RAM mirrored there)...
+//       From $200000-7FFFFF
 uint8_t jagMemSpace[0xF20000];					// The entire memory space of the Jaguar...!
 
 uint8_t * jaguarMainRAM = &jagMemSpace[0x000000];
@@ -126,9 +128,9 @@ uint32_t & subdatb   = *((uint32_t *)&jagMemSpace[0xDFFF1C]);	// Subcode data re
 uint32_t & sb_time   = *((uint32_t *)&jagMemSpace[0xDFFF20]);	// Subcode time and compare enable (D24)
 uint32_t & fifo_data = *((uint32_t *)&jagMemSpace[0xDFFF24]);	// i2s FIFO data
 uint32_t & i2sdat2   = *((uint32_t *)&jagMemSpace[0xDFFF28]);	// i2s FIFO data (old)
-uint32_t & unknown   = *((uint32_t *)&jagMemSpace[0xDFFF2C]);	// Seems to be some sort of I2S interface
+uint32_t & i2sbus    = *((uint32_t *)&jagMemSpace[0xDFFF2C]);	// BUTCH's I2S interface to EEPROM
 #else
-uint32_t butch, dscntrl, ds_data, i2cntrl, sbcntrl, subdata, subdatb, sb_time, fifo_data, i2sdat2, unknown;
+uint32_t butch, dscntrl, ds_data, i2cntrl, sbcntrl, subdata, subdatb, sb_time, fifo_data, i2sdat2, i2sbus;
 #endif
 
 #warning "Need to separate out this stuff (or do we???)"

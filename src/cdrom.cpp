@@ -4,41 +4,31 @@
 // Originally by David Raingeard
 // GCC/SDL port by Niels Wagenaar (Linux/WIN32) and Caz (BeOS)
 // Extensive rewrites/cleanups/fixes by James Hammons
-// (C) 2010 Underground Software
+// BUTCH reverse engineering by Stephan Kapfer/James Hammons
+// (C) 2016 Underground Software
 //
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  ------------------------------------------------------------
 // JLH  01/16/2010  Created this log ;-)
 //
 
 #include "cdrom.h"
 
-#include <string.h>									// For memset, etc.
-//#include "jaguar.h"									// For GET32/SET32 macros
-//#include "m68k.h"	//???
-//#include "memory.h"
-#include "cdintf.h"									// System agnostic CD interface functions
-#include "log.h"
+#include <string.h>				// For memset, etc.
+#include "cdintf.h"				// System agnostic CD interface functions
 #include "dac.h"
+#include "dsp.h"
+#include "eeprom.h"
+#include "event.h"
+#include "jaguar.h"
+#include "log.h"
 
-//#define CDROM_LOG									// For CDROM logging, obviously
+
+//#define CDROM_LOG				// For CDROM logging, obviously
 
 /*
-BUTCH     equ  $DFFF00		; base of Butch=interrupt control register, R/W
-DSCNTRL   equ  BUTCH+4		; DSA control register, R/W
-DS_DATA   equ  BUTCH+$A		; DSA TX/RX data, R/W
-I2CNTRL   equ  BUTCH+$10	; i2s bus control register, R/W
-SBCNTRL   equ  BUTCH+$14	; CD subcode control register, R/W
-SUBDATA   equ  BUTCH+$18	; Subcode data register A
-SUBDATB   equ  BUTCH+$1C	; Subcode data register B
-SB_TIME   equ  BUTCH+$20	; Subcode time and compare enable (D24)
-FIFO_DATA equ  BUTCH+$24	; i2s FIFO data
-I2SDAT1   equ  BUTCH+$24	; i2s FIFO data
-I2SDAT2   equ  BUTCH+$28	; i2s FIFO data
-          equ  BUTCH+$2C	; CD EEPROM interface
-
 ;
 ; Butch's hardware registers
 ;
@@ -109,146 +99,154 @@ $5100 - Mute CD (audio mode only)
 $51FF - Unmute CD (audio mode only)
 $5400 - Read # of sessions on CD
 $70nn - Set oversampling mode
-
-Commands send through serial bus:
-
-$100 - ? Acknowledge ? (Erase/Write disable)
-$130 - ? (Seems to always prefix the $14n commands) (Erase/Write enable)
-$140 - Returns ACK (1) (Write to NVRAM?) (Write selected register)
-$141 - Returns ACK (1)
-$142 - Returns ACK (1)
-$143 - Returns ACK (1)
-$144 - Returns ACK (1)
-$145 - Returns ACK (1)
-$180 - Returns 16-bit value (NVRAM?) (read from EEPROM)
-$181 - Returns 16-bit value
-$182 - Returns 16-bit value
-$183 - Returns 16-bit value
-$184 - Returns 16-bit value
-$185 - Returns 16-bit value
-
-;  The BUTCH interface for the CD-ROM module is a long-word register,
-;   where only the least signifigant 4 bits are used
-;
-eeprom	equ	$DFFF2c			;interface to CD-eeprom
-;
-;  bit3 - busy if 0 after write cmd, or Data In after read cmd 
-;  bit2 - Data Out
-;  bit1 - clock
-;  bit0 - Chip Select (CS)
-;
-;
-;   Commands specific to the National Semiconductor NM93C14
-;
-;
-;  9-bit commands..
-;			 876543210
-eREAD	equ	%110000000		;read from EEPROM
-eEWEN	equ	%100110000		;Erase/write Enable
-eERASE	equ	%111000000		;Erase selected register
-eWRITE	equ	%101000000		;Write selected register
-eERAL	equ	%100100000		;Erase all registers
-eWRAL	equ	%100010000		;Writes all registers
-eEWDS	equ	%100000000		;Erase/Write disable (default)
-
-So... are there $40 words of memory? 128 bytes?
-
 */
 
-// Private function prototypes
+// BUTCH registers
+#define BUTCH		0xDFFF00		// Interrupt control register, R/W
+#define DSCNTRL 	BUTCH + 0x04	// DSA control register, R/W
+#define DS_DATA		BUTCH + 0x0A	// DSA TX/RX data, R/W
+#define I2CNTRL		BUTCH + 0x10	// i2s bus control register, R/W
+#define SBCNTRL		BUTCH + 0x14	// CD subcode control register, R/W
+#define SUBDATA		BUTCH + 0x18	// Subcode data register A
+#define SUBDATB		BUTCH + 0x1C	// Subcode data register B
+#define SB_TIME		BUTCH + 0x20	// Subcode time and compare enable (D24)
+#define FIFO_DATA	BUTCH + 0x24	// i2s FIFO data
+#define I2SDAT2		BUTCH + 0x28	// i2s FIFO data (old)
+#define I2SBUS		BUTCH + 0x2C	// I2S interface to CD EEPROM
 
-static void CDROMBusWrite(uint16_t);
-static uint16_t CDROMBusRead(void);
+// Lines used by CD EEPROM bus (at $DFFF2C, long word)
+#define CDI2DBUS_ACK		0x01	// bit0 - Chip Select (CS)
+#define CDI2SBUS_STB		0x02	// bit1 - clock
+#define CDI2SBUS_TXD		0x04	// bit2 - Data Out
+#define CDI2SBUS_RXD		0x08	// bit3 - busy if 0 after write cmd, or Data
+									//        In after read cmd 
 
-#define BUTCH		0x00				// base of Butch == interrupt control register, R/W
-#define DSCNTRL 	BUTCH + 0x04		// DSA control register, R/W
-#define DS_DATA		BUTCH + 0x0A		// DSA TX/RX data, R/W
-#define I2CNTRL		BUTCH + 0x10		// i2s bus control register, R/W
-#define SBCNTRL		BUTCH + 0x14		// CD subcode control register, R/W
-#define SUBDATA		BUTCH + 0x18		// Subcode data register A
-#define SUBDATB		BUTCH + 0x1C		// Subcode data register B
-#define SB_TIME		BUTCH + 0x20		// Subcode time and compare enable (D24)
-#define FIFO_DATA	BUTCH + 0x24		// i2s FIFO data
-#define I2SDAT2		BUTCH + 0x28		// i2s FIFO data (old)
-#define UNKNOWN		BUTCH + 0x2C		// Seems to be some sort of I2S interface
+// BUTCH interrupt/etc lines
+#define BUTCH_INTS_ENABLE		0x0001
+#define DSA_FIFO_INT_ENABLE		0x0002
+#define DSA_FRAME_INT_ENABLE	0x0004
+#define DSA_SUBCODE_INT_ENABLE	0x0008
+#define DSA_TX_INT_ENABLE		0x0010
+#define DSA_RX_INT_ENABLE		0x0020
+#define DSA_ERROR_INT_ENABLE	0x0040
+// bits 7,8 unused
+#define DSA_FIFO_INT_PENDING	0x0200
+#define DSA_FRAME_INT_PENDING	0x0400
+#define DSA_SUBCODE_INT_PENDING	0x0800
+#define DSA_TX_INT_PENDING		0x1000
+#define DSA_RX_INT_PENDING 		0x2000
+#define DSA_ERROR_INT_PENDING	0x4000
+// This speculation from the CD BIOS
+// Set bit16 -> Enable DSA (in DSCNTRL)
+// Set bit17 -> Reset CD module
+// Set bit18 -> Override CD BIOS in cart space, even if cart plugged in
+// Set bit19 -> Reboot if CD lid is opened
+// Set bit20 -> Reboot if cartridge is pulled
+#define DSA_ENABLE				0x010000
+#define BUTCH_RESET_CD			0x020000
+#define BUTCH_BIOS_ENABLE		0x040000
+#define BUTCH_REBOOT_LID		0x080000
+#define BUTCH_REBOOT_CART		0x100000
 
-const char * BReg[12] = { "BUTCH", "DSCNTRL", "DS_DATA", "???", "I2CNTRL", "SBCNTRL", "SUBDATA", "SUBDATB",
-	"SB_TIME", "FIFO_DATA", "I2SDAT2", "UNKNOWN" };
-//extern const char * whoName[9];
+// I2SCNTRL
+// b0 - I2S data from drive is ON if 1
+// b1 - I2S path to Jerry is ON if 1
+// b2 - Enable data transfer (subcode ???)
+// b3 - Host bus width is 16 if 1, else 32
+// b4 - FIFO state is not empty if 1
+#define I2S_DATA_FROM_CD	0x01
+#define I2S_DATA_TO_JERRY	0x02
+#define I2S_DATA_ENABLE		0x04
+#define I2S_BUS_WIDTH16		0x08
+#define I2S_DATA_IN_FIFO	0x10
 
+// BUTCH Commands (ones we know about :-P)
+#define CMD_PLAY_TRACK		0x01
+#define CMD_STOP			0x02
+#define CMD_READ_TOC		0x03
+#define CMD_PAUSE			0x04
+#define CMD_UNPAUSE			0x05
+#define CMD_GET_MSF			0x0D
+#define CMD_GOTO_MIN		0x10
+#define CMD_GOTO_SEC		0x11
+#define CMD_GOTO_FRM		0x12
+#define CMD_READ_LONG_TOC	0x14
+#define CMD_SET_PLAY_MODE	0x15
+#define CMD_GET_LAST_ERROR	0x16
+#define CMD_GET_LAST_ERR2	0x17
+#define CMD_SET_SESSION		0x18
+#define CMD_SET_START_MIN	0x20
+#define CMD_SET_START_SEC	0x21
+#define CMD_SET_START_FRM	0x22
+#define CMD_SET_STOP_MIN	0x23
+#define CMD_SET_STOP_SEC	0x24
+#define CMD_SET_STOP_FRM	0x25
+#define CMD_GET_STATUS		0x50
+#define CMD_SET_VOLUME		0x51
+#define CMD_SESSION_INFO	0x54
+#define CMD_CLEAR_TOC_READ	0x6A
+#define CMD_OVRSAMPLE_MODE	0x70
 
-static uint8_t cdRam[0x100];
-static uint16_t cdCmd = 0, cdPtr = 0;
+const char * BReg[12] = { "BUTCH", "DSCNTRL", "DS_DATA", "???", "I2CNTRL",
+	"SBCNTRL", "SUBDATA", "SUBDATB", "SB_TIME", "FIFO_DATA", "I2SDAT2",
+	"I2SBUS" };
+
+// BUTCH internal shite
 static bool haveCDGoodness;
 static uint32_t min, sec, frm, block;
-static uint8_t cdBuf[2352 + 96];
+static uint16_t cdCmd = 0;
+static uint32_t cdPtr = 0;
+static uint8_t cdBuffer[2352 + 96];
 static uint32_t cdBufPtr = 2352;
-//Also need to set up (save/restore) the CD's NVRAM
+static uint8_t trackNum = 1, minTrack, maxTrack;
+static uint8_t wordStrobe;
+static uint32_t currentSector, sectorRead;
+static uint32_t cdSpeed;
+
+// BUTCH internal FIFO
+#define FIFO_MASK 0x1FF
+static uint16_t dsfifo[FIFO_MASK + 1];
+static uint16_t dsfStart, dsfEnd;
+
+// BUTCH registers
+// N.B.: At some point, need to change these out to use the ones in memory.cpp
+//uint32_t butchControl;
+uint32_t butchDSCntrl;
+uint32_t butchI2Cntrl;
+uint32_t butchSBCntrl;
+uint32_t butchSubDatA;
+uint32_t butchSubDatB;
+uint32_t butchSBTime;
+uint32_t butchFIFOData;
+uint32_t butchI2SDat2;
+
+// Private function prototypes
+static void QueueDSFIFO(uint16_t data);
+static uint32_t ReadDSFIFO(void);
+static void ButchCommand(uint16_t cmd);
+static void HandleButchControl(void);
+void BUTCHI2SCallback(void);
+uint16_t BUTCHGetDataFromCD(void);
 
 
-//extern bool GetRawTOC(void);
 void CDROMInit(void)
 {
 	haveCDGoodness = CDIntfInit();
-
-//GetRawTOC();
-/*uint8_t buf[2448];
-uint32_t sec = 18667 - 150;
-memset(buf, 0, 2448);
-if (!CDIntfReadBlock(sec, buf))
-{
-	WriteLog("CDROM: Attempt to read with subchannel data failed!\n");
-	return;
+	dsfStart = dsfEnd = 0;
+	currentSector = -1;
+	sectorRead = 0;
 }
 
-//24x98+96
-//96=4x24=4x4x6
-WriteLog("\nCDROM: Read sector %u...\n\n", sec);
-for(int i=0; i<98; i++)
-{
-	WriteLog("%04X: ", i*24);
-	for(int j=0; j<24; j++)
-	{
-		WriteLog("%02X ", buf[j + (i*24)]);
-	}
-	WriteLog("\n");
-}
-WriteLog("\nRaw P-W subchannel data:\n\n");
-for(int i=0; i<6; i++)
-{
-	WriteLog("%02X: ", i*16);
-	for(int j=0; j<16; j++)
-	{
-		WriteLog("%02X ", buf[2352 + j + (i*16)]);
-	}
-	WriteLog("\n");
-}
-WriteLog("\nP subchannel data: ");
-for(int i=0; i<96; i+=8)
-{
-	uint8_t b = 0;
-	for(int j=0; j<8; j++)
-		b |= ((buf[2352 + i + j] & 0x80) >> 7) << (7 - j);
-
-	WriteLog("%02X ", b);
-}
-WriteLog("\nQ subchannel data: ");
-for(int i=0; i<96; i+=8)
-{
-	uint8_t b = 0;
-	for(int j=0; j<8; j++)
-		b |= ((buf[2352 + i + j] & 0x40) >> 6) << (7 - j);
-
-	WriteLog("%02X ", b);
-}
-WriteLog("\n\n");//*/
-}
 
 void CDROMReset(void)
 {
-	memset(cdRam, 0x00, 0x100);
+//	memset(cdRam, 0x00, 0x100);
 	cdCmd = 0;
+	dsfStart = dsfEnd = 0;
+	currentSector = -1;
+	sectorRead = 0;
 }
+
 
 void CDROMDone(void)
 {
@@ -257,10 +255,99 @@ void CDROMDone(void)
 
 
 //
+// We're leveraging the timing subsystem to handle this properly...
+//
+static uint16_t lastLeft, lastRight;
+void BUTCHI2SCallback(void)
+{
+	// Figure callback interval
+	double interval = 1000000.0 / (cdSpeed == 1 ? 44100.0 : 88200.0);
+	// Do we need to do this because there's L&R for each 1/44100th of a second?
+	// I.e., 32 bits of data for each interval, and we're only stuffing 16?
+	// [Not any more, we stuff 32 bits/interval]
+//	interval /= 2.0;
+	// Word strobe just clocks through mindlessly
+	wordStrobe = (wordStrobe + 1) & 0x01;
+	// Set which part of the word strobe we're looking for (0x10 == FALLING)
+	uint8_t sendType = (smode & 0x10 ? 1 : 0);
+
+	uint16_t left = BUTCHGetDataFromCD();
+	uint16_t right = BUTCHGetDataFromCD();
+
+	// Set the appropriate spot for our data, depending on WS setting...
+#if 0
+	if (wordStrobe == 0)
+		lrxd = data;
+	else
+		rrxd = data;
+#endif
+// [last L][last R][curr L][curr R]
+//          ------  ------
+// This is working, BTW...
+	if (sendType == 1)
+	{
+		lrxd = left;
+		rrxd = lastRight;
+	}
+	else
+	{
+		lrxd = left;
+		rrxd = right;
+	}
+
+//WriteLog("BUTCH: LL LR CL CR = [%02X %02X %02X %02X] [%02X %02X]\n", lastLeft, lastRight, left, right, lrxd, rrxd);
+
+	lastLeft = left;
+	lastRight = right;
+
+	// Send IRQ at the appropriate time...
+//	if (wordStrobe == sendType)
+		DSPSetIRQLine(DSPIRQ_SSI, ASSERT_LINE);
+
+	// If all 3 bits aren't set, get outta here...
+	if ((butchI2Cntrl & (I2S_DATA_FROM_CD | I2S_DATA_TO_JERRY | I2S_DATA_ENABLE)) != (I2S_DATA_FROM_CD | I2S_DATA_TO_JERRY | I2S_DATA_ENABLE))
+		return;
+	
+	// Should turn this off once the I2CNTRL is no longer set... [DONE above]
+	SetCallbackTime(BUTCHI2SCallback, interval, EVENT_JERRY);
+}
+
+
+//
+// The bread and butter--get data from the CD drive!
+//
+uint16_t BUTCHGetDataFromCD(void)
+{
+	if (currentSector != sectorRead)
+	{
+		bool status = CDIntfReadBlock(currentSector, cdBuffer);
+
+		if (status == false)
+		{
+			// Handle the error (need to do more than this!)...
+			return 0xFFFF;
+		}
+
+		sectorRead = currentSector;
+		cdPtr = 0;
+	}
+
+	uint16_t data = cdBuffer[cdPtr] | (cdBuffer[cdPtr + 1] << 8);
+	cdPtr += 2;
+
+	// If we run past our buffer, signal a read to the next sector
+	if (cdPtr >= 2352)
+		currentSector++;
+
+	return data;
+}
+
+
+//
 // This approach is probably wrong, but let's do it for now.
 // What's needed is a complete overhaul of the interrupt system so that
-// interrupts are handled as they're generated--instead of the current
-// scheme where they're handled on scanline boundaries.
+// interrupts are handled as they're generated--instead of the current scheme
+// where they're handled on scanline boundaries. [This is DONE now.]
 //
 void BUTCHExec(uint32_t cycles)
 {
@@ -287,669 +374,542 @@ return;
 		GPUSetIRQLine(GPUIRQ_DSP, ASSERT_LINE);
 #endif
 }
+/*
+EEPROM: Butch cmd received: $130 [EE[$30] = $FFFF]
+EEPROM: Butch CS strobed...
+EEPROM: Butch cmd received: $145 [EE[$5] = $3607]
+EEPROM: BUTCH write $D374 to cell $5
+EEPROM: Butch CS strobed...
+CDROM: Write of $0018 to BUTCH+0 [M68K]
+CDROM: Write of $0000 to BUTCH+2 [M68K]
+Write to DSP CTRL by M68K: 00002000 (DSP PC=$00F1B020)
+Write to DSP CTRL by M68K: 00000001 (DSP PC=$00F1B020)
+DSP: Modulo data FFFFF800 written by DSP.
+DAC: M68K writing to SMODE. Bits: WSEN FALLING  [68K PC=00050984]
+CDROM: I2CNTRL+0 is $0 [M68K]
+CDROM: I2CNTRL+2 is $1 [M68K]
+CDROM: Write of $0000 to I2CNTRL+0 [M68K]
+CDROM: Write of $0007 to I2CNTRL+2 [M68K]
+CDROM: Write of $1008 to DS_DATA [M68K]
+CDROM: BUTCH+0 is $18 [M68K]
+CDROM: BUTCH+2 is $1000 [M68K]
+CDROM: DSCNTRL+0 is $1 [M68K]
+CDROM: DSCNTRL+2 is $0 [M68K]
+CDROM: Write of $1122 to DS_DATA [M68K]
+CDROM: BUTCH+0 is $18 [M68K]
+CDROM: BUTCH+2 is $1000 [M68K]
+CDROM: DSCNTRL+0 is $1 [M68K]
+CDROM: DSCNTRL+2 is $0 [M68K]
+CDROM: Write of $1236 to DS_DATA [M68K]
+CDROM: BUTCH+0 is $18 [M68K]
+CDROM: BUTCH+2 is $1000 [M68K]
+CDROM: DSCNTRL+0 is $1 [M68K]
+CDROM: DSCNTRL+2 is $0 [M68K]
+CDROM: BUTCH+0 is $18 [DSP]
+CDROM: BUTCH+2 is $1000 [DSP]
+CDROM: BUTCH+0 is $18 [DSP]
+CDROM: BUTCH+2 is $1000 [DSP]
 
+So basically, how it works is like so. 68K calls CD_jeri, which sets JERRY's
+I2S control to WSEN (word strobe enable) and FALLING (trigger I2S interrupts on
+the falling edge of the word strobe; this basically calls the interrupt service
+routine once the LEFT channel data has been stuffed). The 68K then calls CD_play
+and does 3 goto calls (goto minutes, goto seconds, goto frames) and then hands
+off BUTCH processing to a DSP program. The DSP waits for a $100 acknowledge for
+the goto calls, and then goes from there.
+
+So, because JERRY's I2S is set to FALLING, it will grab longs from the CD that
+are shifted over one word. This explains why the DSP program looks for the long
+as (RIGHT << 16) | LEFT.
+
+Then, 68K sets BUTCH's I2S control to DATA_ENABLE, DATA_FROM_CD & DATA_TO_JERRY.
+So it would seem that because JERRY's I2S INTERNAL bit is *not* set, BUTCH is
+the bus master and drives the I2S.
+
+So it would seem that once DATA_ENABLE is set, the CD starts pumping data over
+the I2S channel (as long as DATA_FROM_CD & DATA_TO_JERRY are set). It probably
+depends on the playback rate set by the 68K (1x or 2x, 44100 or 88200 Hz).
+
+So once we get this go ahead, how do we pump the data in? Could set up a thread
+to do it. Basically have it write the words to L/RRXD and fire off the interrupt
+(I2S Jerry) at the appropriate time set by JERRY's I2S control. Normally, timing
+would be done using... Should be able to use the timing subsystem to run a
+BUTCH callback... Then the timing shouldn't be an issue. But there are *two*
+timing subsystems, which one to use? Probably the JERRY one, then we know for
+sure that it will be synchronized with JERRY...
+
+(We need to figure out how to make those two separate timing systems play nice
+with each other... One can currently run way ahead of the other!)
+
+
+I AR|PRAP|EDOV|AT D  -->  ARI APPROVED DAT
+HEA |ERAD|TR A|<.I)  -->  A HEADER ATRI)<.
+
+004000: 41 54 41 52 49 20 41 50 50 52 4F 56 45 44 20 44 | ATARI APPROVED D
+004010: 41 54 41 20 48 45 41 44 45 52 20 41 54 52 49 29 | ATA HEADER ATRI)
+004020: 3C EC B2 59 E9 FE 0F C0 30 CB 74 29 E5 F0 42 4F | <..Y....0.t)..BO
+004030: C9 B1 0A 18 E4 E4 75 C6 F7 D9 D0 93 55 B5 82 CE | ......u.....U...
+004040: 98 9D CF 1A 96 8C BF 0F A6 D0 71 66 B9 9D E2 A0 | ..........qf....
+004050: 58 26 F5 4E 43 F3 08 57 D3 61 3E 42 53 C1 67 1A | X&.NC..W.a>BS.g.
+004060: 13 73 67 3C 30 21 F5 CF 8E 70 78 1B EE CD E6 57 | .sg<0!...px....W
+004070: 23 A3 56 6C FF B7 9B 40 3D 18 BF 53 66 FE 26 A9 | #.Vl...@=..Sf.&.
+004080: 73 2C 38 F5 C3 4D 4C CD 00 00 00 00 00 00 00 00 | s,8..ML.........
+
+CD public key (@ $F1B4CC):
+00 00 00 2C 80 1E 32 56 F3 58 0F 1F 73 48 8A 32
+20 3E B7 E8 C7 03 17 11 51 6F 8F 92 DC 64 C2 4B
+AE E6 E0 C9 CA 38 35 0E 07 03 EC 4E 3B A8 F3 1F
+2F 90 A6 43 C2 CD A0 FF 2D 5B 26 8E 4A A9 3B 4A
+63 A6 AA 27
+
+
+Baldies (word swapped):
+02B0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00   ................
+02C0: 00 00 00 00 00 00 00 00 00 00 41 54 52 49 41 54   ..........ATRIAT
+02D0: 52 49 41 54 52 49 41 54 52 49 41 54 52 49 41 54   RIATRIATRIATRIAT
+02E0: 52 49 41 54 52 49 41 54 52 49 41 54 52 49 41 54   RIATRIATRIATRIAT
+02F0: 52 49 41 54 52 49 41 54 52 49 41 54 52 49 41 54   RIATRIATRIATRIAT
+0300: 52 49 41 54 52 49 41 54 52 49 41 54 41 52 49 20   RIATRIATRIATARI 
+0310: 41 50 50 52 4F 56 45 44 20 44 41 54 41 20 48 45   APPROVED DATA HE
+0320: 41 44 45 52 20 41 54 52 49 29 3C EC B2 59 E9 FE   ADER ATRI)<..Y..
+0330: 0F C0 30 CB 74 29 E5 F0 42 4F C9 B1 0A 18 E4 E4   ..0.t)..BO......
+0340: 75 C6 F7 D9 D0 93 55 B5 82 CE 98 9D CF 1A 96 8C   u.....U.........
+
+RAW:
+02C0: 00 00 00 00 00 00 00 00 00 00 54 41 49 52 54 41   ..........TAIRTA
+02D0: 49 52 54 41 49 52 54 41 49 52 54 41 49 52 54 41   IRTAIRTAIRTAIRTA
+02E0: 49 52 54 41 49 52 54 41 49 52 54 41 49 52 54 41   IRTAIRTAIRTAIRTA
+02F0: 49 52 54 41 49 52 54 41 49 52 54 41 49 52 54 41   IRTAIRTAIRTAIRTA
+0300: 49 52 54 41 49 52 54 41 49 52 54 41 52 41 20 49   IRTAIRTAIRTARA I
+0310: 50 41 52 50 56 4F 44 45 44 20 54 41 20 41 45 48   PARPVODED TA AEH
+0320: 44 41 52 45 41 20 52 54 29 49 EC 3C 59 B2 FE E9   DAREA RT)I.<Y...
+
+Reversed longs:
+0300: 49 52 54 41 49 52 54 41 49 52 54 41 52 41 20 49   IRTAIRTAIRTARA I
+0300: 49 52 54 41 49 52 54 41 49 52 54 41 52 41 20 49   ATRIATRIATRII AR
+0310: 50 41 52 50 56 4F 44 45 44 20 54 41 20 41 45 48   PARPVODED TA AEH
+0310: 50 41 52 50 56 4F 44 45 44 20 54 41 20 41 45 48   PRAPEDOVAT DHEA 
+0320: 44 41 52 45 41 20 52 54 29 49 EC 3C 59 B2 FE E9   DAREA RT)I.<Y...
+0320: 44 41 52 45 41 20 52 54 29 49 EC 3C 59 B2 FE E9   ERADTR A<.I)...Y
+
+Longs read in from the I2S channel are done as (RIGHT << 16) | LEFT, where
+LEFT and RIGHT are 16-bit words. So there doesn't seem to be any way to make
+a long read work properly
+
+Superfly (word swapped):
+0170: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00   ................
+0180: 00 00 41 54 52 49 41 54 52 49 41 54 52 49 41 54   ..ATRIATRIATRIAT
+0190: 52 49 41 54 52 49 41 54 52 49 41 54 52 49 41 54   RIATRIATRIATRIAT
+01A0: 52 49 41 54 52 49 41 54 52 49 41 54 52 49 41 54   RIATRIATRIATRIAT
+01B0: 52 49 41 54 52 49 41 54 52 49 41 54 52 49 41 54   RIATRIATRIATRIAT
+01C0: 52 49 41 54 41 52 49 20 41 50 50 52 4F 56 45 44   RIATARI APPROVED
+01D0: 20 44 41 54 41 20 48 45 41 44 45 52 20 41 54 52    DATA HEADER ATR
+01E0: 49 23 56 B4 56 49 80 68 79 36 C7 DC C8 84 86 B7   I#V.VI.hy6......
+01F0: 29 16 90 15 7B 49 7E 9A 81 4D B3 54 8C 82 76 FD   )...{I~..M.T..v.
+0200: AE 79 94 3F 1D 52 30 FF F8 46 24 8B F9 1E 3B 50   .y.?.R0..F$...;P
+
+Baldies audio (ripped):
+00000000  52 49 46 46 14 24 44 02  57 41 56 45 66 6d 74 20  |RIFF.$D.WAVEfmt |
+00000010  10 00 00 00 01 00 02 00  44 ac 00 00 10 b1 02 00  |........D.......|
+00000020  04 00 10 00 64 61 74 61  f0 23 44 02|00 00 00 00  |....data.#D.....|
+00000030  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+*
+000014b0  00 00 00 00 00 00 00 00  00 00 00 00 55 ff 43 ff  |............U.C.|
+000014c0  fd fe e9 fe 89 fe 76 fe  2e fe 1a fe 0c fe f5 fd  |......v.........|
+000014d0  24 fe 0c fe 4a fe 34 fe  3e fe 2b fe 0a fe f6 fd  |$...J.4.>.+.....|
+000014e0  0c fe f6 fd 5f fe 48 fe  a3 fe 8c fe be fe aa fe  |...._.H.........|
+000014f0  48 ff 34 ff 7b 00 63 00  6a 01 49 01 1b 01 f4 00  |H.4.{.c.j.I.....|
+00001500  ef ff c9 ff 11 ff f2 fe  ee fe d3 fe 0b ff ee fe  |................|
+00001510  02 ff e4 fe e8 fe cb fe  df fe c5 fe f2 fe da fe  |................|
+00001520  3c ff 21 ff bb ff a1 ff  2b 00 15 00 44 00 31 00  |<.!.....+...D.1.|
+00001530  1c 00 07 00 07 00 ee ff  1b 00 03 00 07 00 f5 ff  |................|
+00001540  96 ff 88 ff 1d ff 09 ff  1c ff 00 ff 8d ff 6d ff  |..............m.|
+00001550  f5 ff d8 ff 16 00 fe ff  19 00 02 00 04 00 ec ff  |................|
+00001560  af ff 95 ff 32 ff 19 ff  dd fe c5 fe bd fe a4 fe  |....2...........|
+00001570  a6 fe 8b fe b7 fe 9c fe  23 ff 09 ff 9d ff 84 ff  |........#.......|
+00001580  a0 ff 84 ff 3f ff 21 ff  1f ff 04 ff 78 ff 62 ff  |....?.!.....x.b.|
+00001590  be ff a9 ff 6b ff 54 ff  c7 fe ae fe 91 fe 7a fe  |....k.T.......z.|
+000015a0  0a ff f8 fe a1 ff 8f ff  ae ff 97 ff 48 ff 2e ff  |............H...|
+000015b0  17 ff 00 ff 6e ff 5b ff  ed ff da ff 23 00 0b 00  |....n.[.....#...|
+000015c0  10 00 f7 ff fb ff e4 ff  ff ff eb ff 0c 00 f6 ff  |................|
+000015d0  10 00 f6 ff 0c 00 f0 ff  09 00 ee ff 0a 00 ef ff  |................|
+
+Baldies audio (raw, word swapped):
+0200: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00   ................
+0210: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00   ................
+0220: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00   ................
+0230: FF 55 FF 43 FE FD FE E9 FE 89 FE 76 FE 2E FE 1A   .U.C.......v....
+0240: FE 0C FD F5 FE 24 FE 0C FE 4A FE 34 FE 3E FE 2B   .....$...J.4.>.+
+0250: FE 0A FD F6 FE 0C FD F6 FE 5F FE 48 FE A3 FE 8C   ........._.H....
+0260: FE BE FE AA FF 48 FF 34 00 7B 00 63 01 6A 01 49   .....H.4.{.c.j.I
+0270: 01 1B 00 F4 FF EF FF C9 FF 11 FE F2 FE EE FE D3   ................
+0280: FF 0B FE EE FF 02 FE E4 FE E8 FE CB FE DF FE C5   ................
+0290: FE F2 FE DA FF 3C FF 21 FF BB FF A1 00 2B 00 15   .....<.!.....+..
+02A0: 00 44 00 31 00 1C 00 07 00 07 FF EE 00 1B 00 03   .D.1............
+02B0: 00 07 FF F5 FF 96 FF 88 FF 1D FF 09 FF 1C FF 00   ................
+02C0: FF 8D FF 6D FF F5 FF D8 00 16 FF FE 00 19 00 02   ...m............
+02D0: 00 04 FF EC FF AF FF 95 FF 32 FF 19 FE DD FE C5   .........2......
+02E0: FE BD FE A4 FE A6 FE 8B FE B7 FE 9C FF 23 FF 09   .............#..
+02F0: FF 9D FF 84 FF A0 FF 84 FF 3F FF 21 FF 1F FF 04   .........?.!....
+0300: FF 78 FF 62 FF BE FF A9 FF 6B FF 54 FE C7 FE AE   .x.b.....k.T....
+0310: FE 91 FE 7A FF 0A FE F8 FF A1 FF 8F FF AE FF 97   ...z............
+0320: FF 48 FF 2E FF 17 FF 00 FF 6E FF 5B FF ED FF DA   .H.......n.[....
+*/
 
 //
 // CD-ROM memory access functions
 //
-
-uint8_t CDROMReadByte(uint32_t offset, uint32_t who/*=UNKNOWN*/)
-{
-#ifdef CDROM_LOG
-	if ((offset & 0xFF) < 12 * 4)
-		WriteLog("[%s] ", BReg[(offset & 0xFF) / 4]);
-	WriteLog("CDROM: %s reading byte $%02X from $%08X [68K PC=$%08X]\n", whoName[who], offset, cdRam[offset & 0xFF], m68k_get_reg(NULL, M68K_REG_PC));
-#endif
-	return cdRam[offset & 0xFF];
-}
-
-static uint8_t trackNum = 1, minTrack, maxTrack;
-//static uint8_t minutes[16] = {  0,  0,  2,  5,  7, 10, 12, 15, 17, 20, 22, 25, 27, 30, 32, 35 };
-//static uint8_t seconds[16] = {  0,  0, 30,  0, 30,  0, 30,  0, 30,  0, 30,  0, 30,  0, 30,  0 };
-//static uint8_t frames[16]  = {  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0 };
-//static uint16_t sd = 0;
 uint16_t CDROMReadWord(uint32_t offset, uint32_t who/*=UNKNOWN*/)
 {
-	offset &= 0xFF;
-
 	uint16_t data = 0x0000;
 
-	if (offset == BUTCH)
-		data = 0x0000;
-	else if (offset == BUTCH + 2)
-// We need to fix this so it's not as brain-dead as it is now--i.e., make it so that when
-// a command is sent to the CDROM, we control here whether or not it succeeded or whether
-// the command is still being carried out, etc.
-
-// bit12 - Command to CD drive pending (trans buffer empty if 1)
-// bit13 - Response from CD drive pending (rec buffer full if 1)
-//		data = (haveCDGoodness ? 0x3000 : 0x0000);	// DSA RX Interrupt pending bit (0 = pending)
-//This only returns ACKs for interrupts that are set:
-//This doesn't work for the initial code that writes $180000 to BUTCH. !!! FIX !!!
-		data = (haveCDGoodness ? cdRam[BUTCH + 3] << 8 : 0x0000);
-//	else if (offset == SUBDATA + 2)
-//		data = sd++ | 0x0010;						// Have no idea what this is...
-	else if (offset == DS_DATA && haveCDGoodness)
+	switch (offset)
 	{
-		if ((cdCmd & 0xFF00) == 0x0100)				// ???
-		{
-//Not sure how to acknowledge the ???...
-//			data = 0x0400;//?? 0x0200;
-			cdPtr++;
-			switch (cdPtr)
-			{
-			case 1:
-				data = 0x0000;
-				break;
-			case 2:
-				data = 0x0100;
-				break;
-			case 3:
-				data = 0x0200;
-				break;
-			case 4:
-				data = 0x0300;
-				break;
-			case 5:
-				data = 0x0400;
-			}//*/
-			WriteLog("CDROM: Reading DS_DATA (???), cdCmd=$%04X\n", cdCmd);
-		}
-		else if ((cdCmd & 0xFF00) == 0x0200)			// Stop CD
-		{
-//Not sure how to acknowledge the stop...
-			data = 0x0400;//?? 0x0200;
-/*			cdPtr++;
-			switch (cdPtr)
-			{
-			case 1:
-				data = 0x00FF;
-				break;
-			case 2:
-				data = 0x01FF;
-				break;
-			case 3:
-				data = 0x02FF;
-				break;
-			case 4:
-				data = 0x03FF;
-				break;
-			case 5:
-				data = 0x0400;
-			}//*/
-			WriteLog("CDROM: Reading DS_DATA (stop), cdCmd=$%04X\n", cdCmd);
-		}
-		else if ((cdCmd & 0xFF00) == 0x0300)		// Read session TOC (overview?)
-		{
+	case BUTCH:
+		data = butch >> 16;
+		WriteLog("CDROM: BUTCH+0 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case BUTCH + 2:
+		data = butch & 0xFFFF;
+		WriteLog("CDROM: BUTCH+2 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case DSCNTRL:
+		data = butchDSCntrl >> 16;
+		WriteLog("CDROM: DSCNTRL+0 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case DSCNTRL + 2:
+		data = butchDSCntrl & 0xFFFF;
+		WriteLog("CDROM: DSCNTRL+2 is $%X [%s]\n", data, whoName[who]);
+		// We know it does this much, does it do more than this?
+		if (dsfStart == dsfEnd)
+			butch &= ~DSA_RX_INT_PENDING;
 
-/*
-TOC: [Sess] [adrCtl] [?] [point] [?] [?] [?] [?] [pmin] [psec] [pframe]
-TOC: 1 10 00 a0 00:00:00 00 01:00:00
-TOC: 1 10 00 a1 00:00:00 00 01:00:00
-TOC: 1 10 00 a2 00:00:00 00 03:42:42
-TOC: 1 10 00  1 00:00:00 00 00:02:00   <-- Track #1
-TOC: 1 50 00 b0 06:12:42 02 79:59:74
-TOC: 1 50 00 c0 128:00:32 00 97:18:06
-TOC: 2 10 00 a0 00:00:00 00 02:00:00
-TOC: 2 10 00 a1 00:00:00 00 11:00:00
-TOC: 2 10 00 a2 00:00:00 00 54:32:18
-TOC: 2 10 00  2 00:00:00 00 06:14:42   <-- Track #2
-TOC: 2 10 00  3 00:00:00 00 06:24:42   <-- Track #3
-TOC: 2 10 00  4 00:00:00 00 17:42:00   <-- Track #4
-TOC: 2 10 00  5 00:00:00 00 22:26:15   <-- Track #5
-TOC: 2 10 00  6 00:00:00 00 29:50:16   <-- Track #6
-TOC: 2 10 00  7 00:00:00 00 36:01:49   <-- Track #7
-TOC: 2 10 00  8 00:00:00 00 40:37:59   <-- Track #8
-TOC: 2 10 00  9 00:00:00 00 45:13:70   <-- Track #9
-TOC: 2 10 00  a 00:00:00 00 49:50:06   <-- Track #10
-TOC: 2 10 00  b 00:00:00 00 54:26:17   <-- Track #11
-*/
-
-//Should do something like so:
-//			data = GetSessionInfo(cdCmd & 0xFF, cdPtr);
-			data = CDIntfGetSessionInfo(cdCmd & 0xFF, cdPtr);
-			if (data == 0xFF)	// Failed...
-			{
-				data = 0x0400;
-				WriteLog("CDROM: Requested invalid session #%u (or failed to load TOC, or bad cdPtr value)\n", cdCmd & 0xFF);
-			}
-			else
-			{
-				data |= (0x20 | cdPtr++) << 8;
-				WriteLog("CDROM: Reading DS_DATA (session #%u TOC byte #%u): $%04X\n", cdCmd & 0xFF, cdPtr, data);
-			}
-
-/*			bool isValidSession = ((cdCmd & 0xFF) == 0 ? true : false);//Hardcoded... !!! FIX !!!
-//NOTE: This should return error condition if the requested session doesn't exist! ($0400?)
-			if (isValidSession)
-			{
-				cdPtr++;
-				switch (cdPtr)
-				{
-				case 1:
-					data = 0x2001;	// Min track for this session?
-					break;
-				case 2:
-					data = 0x210A;	// Max track for this session?
-					break;
-				case 3:
-					data = 0x2219;	// Max lead-out time, absolute minutes
-					break;
-				case 4:
-					data = 0x2319;	// Max lead-out time, absolute seconds
-					break;
-				case 5:
-					data = 0x2419;	// Max lead-out time, absolute frames
-					break;
-				default:
-					data = 0xFFFF;
-
-//;    +0 - unused, reserved (0)
-//;    +1 - unused, reserved (0)
-//;    +2 - minimum track number
-//;    +3 - maximum track number
-//;    +4 - total number of sessions
-//;    +5 - start of last lead-out time, absolute minutes
-//;    +6 - start of last lead-out time, absolute seconds
-//;    +7 - start of last lead-out time, absolute frames
-
-				}
-				WriteLog("CDROM: Reading DS_DATA (session #%u TOC byte #%u): $%04X\n", cdCmd & 0xFF, cdPtr, data);
-			}
-			else
-			{
-				data = 0x0400;
-				WriteLog("CDROM: Requested invalid session #%u\n", cdCmd & 0xFF);
-			}*/
-		}
-		// Seek to m, s, or f position
-		else if ((cdCmd & 0xFF00) == 0x1000 || (cdCmd & 0xFF00) == 0x1100 || (cdCmd & 0xFF00) == 0x1200)
-			data = 0x0100;	// Success, though this doesn't take error handling into account.
-			// Ideally, we would also set the bits in BUTCH to let the processor know that
-			// this is ready to be read... !!! FIX !!!
-		else if ((cdCmd & 0xFF00) == 0x1400)		// Read "full" session TOC
-		{
-//Need to be a bit more tricky here, since it's reading the "session" TOC instead of the
-//full TOC--so we need to check for the min/max tracks for each session here... [DONE]
-
-			if (trackNum > maxTrack)
-			{
-				data = 0x400;
-WriteLog("CDROM: Requested invalid track #%u for session #%u\n", trackNum, cdCmd & 0xFF);
-			}
-			else
-			{
-				if (cdPtr < 0x62)
-					data = (cdPtr << 8) | trackNum;
-				else if (cdPtr < 0x65)
-					data = (cdPtr << 8) | CDIntfGetTrackInfo(trackNum, (cdPtr - 2) & 0x0F);
-
-WriteLog("CDROM: Reading DS_DATA (session #%u, full TOC byte #%u): $%04X\n", cdCmd & 0xFF, (cdPtr+1) & 0x0F, data);
-
-				cdPtr++;
-				if (cdPtr == 0x65)
-					cdPtr = 0x60, trackNum++;
-			}
-
-			// Note that it seems to return track info in sets of 4 (or is it 5?)
-/*
-;    +0 - track # (must be non-zero)
-;    +1 - absolute minutes (0..99), start of track
-;    +2 - absolute seconds (0..59), start of track
-;    +3 - absolute frames, (0..74), start of track
-;    +4 - session # (0..99)
-;    +5 - track duration minutes
-;    +6 - track duration seconds
-;    +7 - track duration frames
-*/
-			// Seems to be the following format: $60xx -> Track #xx
-			//                                   $61xx -> min?   (trk?)
-			//                                   $62xx -> sec?   (min?)
-			//                                   $63xx -> frame? (sec?)
-			//                                   $64xx -> ?      (frame?)
-/*			cdPtr++;
-			switch (cdPtr)
-			{
-			case 1:
-				data = 0x6000 | trackNum;	// Track #
-				break;
-			case 2:
-				data = 0x6100 | trackNum;	// Track # (again?)
-				break;
-			case 3:
-				data = 0x6200 | minutes[trackNum];	// Minutes
-				break;
-			case 4:
-				data = 0x6300 | seconds[trackNum];	// Seconds
-				break;
-			case 5:
-				data = 0x6400 | frames[trackNum];		// Frames
-				trackNum++;
-				cdPtr = 0;
-			}//*/
-		}
-		else if ((cdCmd & 0xFF00) == 0x1500)		// Read CD mode
-		{
-			data = cdCmd | 0x0200;	// ?? not sure ?? [Seems OK]
-			WriteLog("CDROM: Reading DS_DATA (mode), cdCmd=$%04X\n", cdCmd);
-		}
-		else if ((cdCmd & 0xFF00) == 0x1800)		// Spin up session #
-		{
-			data = cdCmd;
-			WriteLog("CDROM: Reading DS_DATA (spin up session), cdCmd=$%04X\n", cdCmd);
-		}
-		else if ((cdCmd & 0xFF00) == 0x5400)		// Read # of sessions
-		{
-			data = cdCmd | 0x00;	// !!! Hardcoded !!! FIX !!!
-			WriteLog("CDROM: Reading DS_DATA (# of sessions), cdCmd=$%04X\n", cdCmd);
-		}
-		else if ((cdCmd & 0xFF00) == 0x7000)		// Read oversampling
-		{
-//NOTE: This setting will probably affect the # of DSP interrupts that need to happen. !!! FIX !!!
-			data = cdCmd;
-			WriteLog("CDROM: Reading DS_DATA (oversampling), cdCmd=$%04X\n", cdCmd);
-		}
-		else
-		{
-			data = 0x0400;
-			WriteLog("CDROM: Reading DS_DATA, unhandled cdCmd=$%04X\n", cdCmd);
-		}
+		break;
+	case DS_DATA:
+		data = ReadDSFIFO();
+		WriteLog("CDROM: DS_DATA is $%X [%s]\n", data, whoName[who]);
+		break;
+	case I2CNTRL:
+		data = butchI2Cntrl >> 16;
+		WriteLog("CDROM: I2CNTRL+0 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case I2CNTRL + 2:
+		data = butchI2Cntrl & 0xFFFF;
+		WriteLog("CDROM: I2CNTRL+2 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case SBCNTRL:
+		WriteLog("CDROM: SBCNTRL+0 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case SBCNTRL + 2:
+		WriteLog("CDROM: SBCNTRL+2 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case SUBDATA:
+		WriteLog("CDROM: SUBDATA+0 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case SUBDATA + 2:
+		WriteLog("CDROM: SUBDATA+2 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case SUBDATB:
+		WriteLog("CDROM: SUBDATB+0 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case SUBDATB + 2:
+		WriteLog("CDROM: SUBDATB+2 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case SB_TIME:
+		WriteLog("CDROM: SB_TIME+0 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case SB_TIME + 2:
+		WriteLog("CDROM: SB_TIME+2 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case FIFO_DATA:
+		WriteLog("CDROM: FIFO_DATA+0 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case FIFO_DATA + 2:
+		WriteLog("CDROM: FIFO_DATA+2 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case I2SDAT2:
+		WriteLog("CDROM: I2SDAT2+0 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case I2SDAT2 + 2:
+		WriteLog("CDROM: I2SDAT2+2 is $%X [%s]\n", data, whoName[who]);
+		break;
+	case I2SBUS + 2:
+		data = (uint16_t)ButchEEReadLong();
+//		WriteLog("CDROM: EERead returned $%X [%s]\n", data, whoName[who]);
+		break;
+	// Knowns we don't want logged...
+	case I2SBUS:
+		break;
+	default:
+		WriteLog("CDROM: Unknown read at $%06X by %s...\n", offset, whoName[who]);
+		break;
 	}
-	else if (offset == DS_DATA && !haveCDGoodness)
-		data = 0x0400;								// No CD interface present, so return error
-	else if (offset >= FIFO_DATA && offset <= FIFO_DATA + 3)
-	{
-	}
-	else if (offset >= FIFO_DATA + 4 && offset <= FIFO_DATA + 7)
-	{
-	}
-	else
-		data = GET16(cdRam, offset);
 
-//Returning $00000008 seems to cause it to use the starfield. Dunno why.
-// It looks like it's getting the CD_mode this way...
-//Temp, for testing...
-//Very interesting...! Seems to control sumthin' or other...
-/*if (offset == 0x2C || offset == 0x2E)
-	data = 0xFFFF;//*/
-/*if (offset == 0x2C)
-	data = 0x0000;
-if (offset == 0x2E)
-	data = 0;//0x0008;//*/
-	if (offset == UNKNOWN + 2)
-		data = CDROMBusRead();
-
-#ifdef CDROM_LOG
-	if ((offset & 0xFF) < 11 * 4)
-		WriteLog("[%s] ", BReg[(offset & 0xFF) / 4]);
-	if (offset != UNKNOWN && offset != UNKNOWN + 2)
-		WriteLog("CDROM: %s reading word $%04X from $%08X [68K PC=$%08X]\n", whoName[who], data, offset, m68k_get_reg(NULL, M68K_REG_PC));
-#endif
 	return data;
 }
 
-void CDROMWriteByte(uint32_t offset, uint8_t data, uint32_t who/*=UNKNOWN*/)
-{
-	offset &= 0xFF;
-	cdRam[offset] = data;
-
-#ifdef CDROM_LOG
-	if ((offset & 0xFF) < 12 * 4)
-		WriteLog("[%s] ", BReg[(offset & 0xFF) / 4]);
-	WriteLog("CDROM: %s writing byte $%02X at $%08X [68K PC=$%08X]\n", whoName[who], data, offset, m68k_get_reg(NULL, M68K_REG_PC));
-#endif
-}
 
 void CDROMWriteWord(uint32_t offset, uint16_t data, uint32_t who/*=UNKNOWN*/)
 {
-	offset &= 0xFF;
-	SET16(cdRam, offset, data);
-
-	// Command register
-//Lesse what this does... Seems to work OK...!
-	if (offset == DS_DATA)
+	switch (offset)
 	{
-		cdCmd = data;
-		if ((data & 0xFF00) == 0x0200)				// Stop CD
-		{
-			cdPtr = 0;
-			WriteLog("CDROM: Stopping CD\n", data & 0xFF);
-		}
-		else if ((data & 0xFF00) == 0x0300)			// Read session TOC (short? overview?)
-		{
-			cdPtr = 0;
-			WriteLog("CDROM: Reading TOC for session #%u\n", data & 0xFF);
-		}
-//Not sure how these three acknowledge...
-		else if ((data & 0xFF00) == 0x1000)			// Seek to minute position
-		{
-			min = data & 0x00FF;
-		}
-		else if ((data & 0xFF00) == 0x1100)			// Seek to second position
-		{
-			sec = data & 0x00FF;
-		}
-		else if ((data & 0xFF00) == 0x1200)			// Seek to frame position
-		{
-			frm = data & 0x00FF;
-			block = (((min * 60) + sec) * 75) + frm;
-			cdBufPtr = 2352;						// Ensure that SSI read will do so immediately
-			WriteLog("CDROM: Seeking to %u:%02u:%02u [block #%u]\n", min, sec, frm, block);
-		}
-		else if ((data & 0xFF00) == 0x1400)			// Read "full" TOC for session
-		{
-			cdPtr = 0x60,
-			minTrack = CDIntfGetSessionInfo(data & 0xFF, 0),
-			maxTrack = CDIntfGetSessionInfo(data & 0xFF, 1);
-			trackNum = minTrack;
-			WriteLog("CDROM: Reading \"full\" TOC for session #%u (min=%u, max=%u)\n", data & 0xFF, minTrack, maxTrack);
-		}
-		else if ((data & 0xFF00) == 0x1500)			// Set CDROM mode
-		{
-			// Mode setting is as follows: bit 0 set -> single speed, bit 1 set -> double,
-			// bit 3 set -> multisession CD, bit 3 unset -> audio CD
-			WriteLog("CDROM: Setting mode $%02X\n", data & 0xFF);
-		}
-		else if ((data & 0xFF00) == 0x1800)			// Spin up session #
-		{
-			WriteLog("CDROM: Spinning up session #%u\n", data & 0xFF);
-		}
-		else if ((data & 0xFF00) == 0x5400)			// Read # of sessions
-		{
-			WriteLog("CDROM: Reading # of sessions\n", data & 0xFF);
-		}
-		else if ((data & 0xFF00) == 0x7000)			// Set oversampling rate
-		{
-			// 1 = none, 2 = 2x, 3 = 4x, 4 = 8x
-			uint32_t rates[5] = { 0, 1, 2, 4, 8 };
-			WriteLog("CDROM: Setting oversample rate to %uX\n", rates[(data & 0xFF)]);
-		}
-		else
-			WriteLog("CDROM: Unknown command $%04X\n", data);
-	}//*/
-
-	if (offset == UNKNOWN + 2)
-		CDROMBusWrite(data);
-
-#ifdef CDROM_LOG
-	if ((offset & 0xFF) < 11 * 4)
-		WriteLog("[%s] ", BReg[(offset & 0xFF) / 4]);
-	if (offset != UNKNOWN && offset != UNKNOWN + 2)
-		WriteLog("CDROM: %s writing word $%04X at $%08X [68K PC=$%08X]\n", whoName[who], data, offset, m68k_get_reg(NULL, M68K_REG_PC));
-#endif
-}
-
-//
-// State machine for sending/receiving data along a serial bus
-//
-
-enum ButchState { ST_INIT, ST_RISING, ST_FALLING };
-static ButchState currentState = ST_INIT;
-static uint16_t counter = 0;
-static bool cmdTx = false;
-static uint16_t busCmd;
-static uint16_t rxData, txData;
-static uint16_t rxDataBit;
-static bool firstTime = false;
-
-static void CDROMBusWrite(uint16_t data)
-{
-//This is kinda lame. What we should do is check for a 0->1 transition on either bits 0 or 1...
-//!!! FIX !!!
-
-#ifdef CDROM_LOG
-	if (data & 0xFFF0)
-		WriteLog("CDROM: BusWrite write on unknown line: $%04X\n", data);
-#endif
-
-	switch (currentState)
-	{
-	case ST_INIT:
-		currentState = ST_RISING;
+	case BUTCH:
+		WriteLog("CDROM: Write of $%04X to BUTCH+0 [%s]\n", data, whoName[who]);
+		butch = (butch & 0x0000FFFF) | (data << 16);
+		HandleButchControl();
 		break;
-	case ST_RISING:
-		if (data & 0x0001)							// Command coming
-		{
-			cmdTx = true;
-			counter = 0;
-			busCmd = 0;
-		}
-		else
-		{
-			if (cmdTx)
-			{
-				busCmd <<= 1;						// Make room for next bit
-				busCmd |= (data & 0x04);			// & put it in
-				counter++;
-
-				if (counter == 9)
-				{
-					busCmd >>= 2;					// Because we ORed bit 2, we need to shift right by 2
-					cmdTx = false;
-
-//What it looks like:
-//It seems that the $18x series reads from NVRAM while the
-//$130, $14x, $100 series writes values to NVRAM...
-					if (busCmd == 0x180)
-						rxData = 0x0024;//1234;
-					else if (busCmd == 0x181)
-						rxData = 0x0004;//5678;
-					else if (busCmd == 0x182)
-						rxData = 0x0071;//9ABC;
-					else if (busCmd == 0x183)
-						rxData = 0xFF67;//DEF0;
-					else if (busCmd == 0x184)
-						rxData = 0xFFFF;//892F;
-					else if (busCmd == 0x185)
-						rxData = 0xFFFF;//8000;
-					else
-						rxData = 0x0001;
-//						rxData = 0x8349;//8000;//0F67;
-
-					counter = 0;
-					firstTime = true;
-					txData = 0;
-#ifdef CDROM_LOG
-					WriteLog("CDROM: *** BusWrite got command $%04X\n", busCmd);
-#endif
-				}
-			}
-			else
-			{
-				txData = (txData << 1) | ((data & 0x04) >> 2);
-//WriteLog("[%s]", data & 0x04 ? "1" : "0");
-
-				rxDataBit = (rxData & 0x8000) >> 12;
-				rxData <<= 1;
-				counter++;
-#ifdef CDROM_LOG
-				if (counter == 16)
-					WriteLog("CDROM: *** BusWrite got extra command $%04X\n", txData);
-#endif
-			}
-		}
-
-		currentState = ST_FALLING;
+	case BUTCH + 2:
+		WriteLog("CDROM: Write of $%04X to BUTCH+2 [%s]\n", data, whoName[who]);
+		butch = (butch & 0xFFFF0000) | data;
+		HandleButchControl();
 		break;
-	case ST_FALLING:
-		currentState = ST_INIT;
+	case DSCNTRL:
+		WriteLog("CDROM: Write of $%04X to DSCNTRL+0 [%s]\n", data, whoName[who]);
+		butchDSCntrl = (butchDSCntrl & 0x0000FFFF) | (data << 16);
+		break;
+	case DSCNTRL + 2:
+		WriteLog("CDROM: Write of $%04X to DSCNTRL+2 [%s]\n", data, whoName[who]);
+		butchDSCntrl = (butchDSCntrl & 0xFFFF0000) | data;
+		break;
+	case DS_DATA:
+		WriteLog("CDROM: Write of $%04X to DS_DATA [%s]\n", data, whoName[who]);
+		ButchCommand(data);
+		break;
+	case I2CNTRL:
+		WriteLog("CDROM: Write of $%04X to I2CNTRL+0 [%s]\n", data, whoName[who]);
+		butchI2Cntrl = (butchI2Cntrl & 0x0000FFFF) | (data << 16);
+		break;
+	case I2CNTRL + 2:
+		WriteLog("CDROM: Write of $%04X to I2CNTRL+2 [%s]\n", data, whoName[who]);
+		butchI2Cntrl = (butchI2Cntrl & 0xFFFF0000) | data;
+
+		if ((butchI2Cntrl & (I2S_DATA_FROM_CD | I2S_DATA_TO_JERRY | I2S_DATA_ENABLE)) == (I2S_DATA_FROM_CD | I2S_DATA_TO_JERRY | I2S_DATA_ENABLE))
+		{
+			wordStrobe = 1;
+			SetCallbackTime(BUTCHI2SCallback, 1000000.0 / 44100.0, EVENT_JERRY);
+		}
+
+		break;
+	case SBCNTRL:
+		WriteLog("CDROM: Write of $%04X to SBCNTRL+0 [%s]\n", data, whoName[who]);
+		butchSBCntrl = (butchI2Cntrl & 0x0000FFFF) | (data << 16);
+		break;
+	case SBCNTRL + 2:
+		WriteLog("CDROM: Write of $%04X to SBCNTRL+2 [%s]\n", data, whoName[who]);
+		butchSBCntrl = (butchSBCntrl & 0xFFFF0000) | data;
+		break;
+	case SB_TIME:
+		WriteLog("CDROM: Write of $%04X to SB_TIME+0 [%s]\n", data, whoName[who]);
+		butchSBTime = (butchSBTime & 0x0000FFFF) | (data << 16);
+		break;
+	case SB_TIME + 2:
+		WriteLog("CDROM: Write of $%04X to SB_TIME+2 [%s]\n", data, whoName[who]);
+		butchSBTime = (butchSBTime & 0xFFFF0000) | data;
+		break;
+	case I2SBUS + 2:
+//		WriteLog("CDROM: Write of $%04X to I2SBUS+2 [%s]\n", data, whoName[who]);
+		ButchEEWriteLong((uint32_t)data);
+		break;
+	// Knowns we don't want logged...
+	case I2SBUS:
+		break;
+	default:
+		WriteLog("CDROM: Unknown write of $%04X at $%06X by %s...\n", data, offset, whoName[who]);
 		break;
 	}
 }
 
-static uint16_t CDROMBusRead(void)
+
+void SetButchLine(uint16_t data)
 {
-// It seems the counter == 0 simply waits for a single bit acknowledge-- !!! FIX !!!
-// Or does it? Hmm. It still "pumps" 16 bits through above, so how is this special?
-// Seems to be because it sits and looks at it as if it will change. Dunno!
-#ifdef CDROM_LOG
-	if ((counter & 0x0F) == 0)
+	// hmm.
+	butch |= data;
+}
+
+
+//
+// Queue up a word in the DS_DATA FIFO (internal to BUTCH)
+//
+static void QueueDSFIFO(uint16_t data)
+{
+	// Should signal an error somehow...
+	if (dsfStart == ((dsfEnd + 1) & FIFO_MASK))
 	{
-		if (counter == 0 && rxDataBit == 0)
-		{
-			if (firstTime)
-			{
-				firstTime = false;
-				WriteLog("0...\n");
-			}
-		}
+		WriteLog("CDROM: DS FIFO overflowed! :-(\n");
+		return;
+	}
+
+	dsfifo[dsfEnd] = data;
+	dsfEnd = (dsfEnd + 1) & FIFO_MASK;
+	SetButchLine(DSA_RX_INT_PENDING);
+}
+
+
+//
+// Read a word from the DS_DATA FIFO (internal to BUTCH)
+//
+static uint32_t ReadDSFIFO(void)
+{
+	uint32_t data = 0xFFFF;
+
+	// We return data only if there is any in the FIFO
+	if (dsfStart != dsfEnd)
+	{
+		data = (uint32_t)dsfifo[dsfStart];
+		dsfStart = (dsfStart + 1) & FIFO_MASK;
+	}
+
+	return data;
+}
+
+
+//
+// Handle changes in BUTCH requested by users
+//
+static void HandleButchControl(void)
+{
+	// Did they turn off the CD BIOS?
+	if (!(butch & BUTCH_BIOS_ENABLE))
+	{
+		// Need to set up cart shite, since this is all done thru the BIOS
+		// For now, we'll just blank out the cart
+		memset(jaguarMainROM, 0xFF, 0x200000);
+	}
+}
+
+
+//
+// Handle command sent to BUTCH thru DS_DATA
+//
+static void ButchCommand(uint16_t cmd)
+{
+	// Sanity check
+	if (haveCDGoodness == false)
+		return;
+
+	// Needed??? Maybe...
+	if (cmd == 0)
+		return;
+
+	SetButchLine(DSA_TX_INT_PENDING);
+
+	// Split off parameter from the command, isolate the command
+	uint16_t param = cmd & 0x00FF;
+	cmd >>= 8;
+
+	switch (cmd)
+	{
+	case CMD_PLAY_TRACK:	// Play track <param>
+		break;
+	case CMD_STOP:			// Stop CD
+		; // No return value
+		break;
+	case CMD_READ_TOC:		// Read TOC, session #<param> (1st session is zero)
+	{
+		uint16_t status = CDIntfReadShortTOC(param);
+
+		if (status != 0)
+			QueueDSFIFO(status);
 		else
-			WriteLog("%s\n", rxDataBit ? "1" : "0");
-	}
-	else
-		WriteLog("%s", rxDataBit ? "1" : "0");
-#endif
-
-	return rxDataBit;
-}
-
-//
-// This simulates a read from BUTCH over the SSI to JERRY. Uses real reading!
-//
-//temp, until I can fix my CD image... Argh!
-static uint8_t cdBuf2[2532 + 96], cdBuf3[2532 + 96];
-uint16_t GetWordFromButchSSI(uint32_t offset, uint32_t who/*= UNKNOWN*/)
-{
-	bool go = ((offset & 0x0F) == 0x0A || (offset & 0x0F) == 0x0E ? true : false);
-
-	if (!go)
-		return 0x000;
-
-// The problem comes in here. Really, we should generate the IRQ once we've stuffed
-// our values into the DAC L/RRXD ports...
-// But then again, the whole IRQ system needs an overhaul in order to make it more
-// cycle accurate WRT to the various CPUs. Right now, it's catch-as-catch-can, which
-// means that IRQs get serviced on scanline boundaries instead of when they occur.
-	cdBufPtr += 2;
-
-	if (cdBufPtr >= 2352)
-	{
-WriteLog("CDROM: %s reading block #%u...\n", whoName[who], block);
-		//No error checking. !!! FIX !!!
-//NOTE: We have to subtract out the 1st track start as well (in cdintf_foo.cpp)!
-//		CDIntfReadBlock(block - 150, cdBuf);
-
-//Crappy kludge for shitty shit. Lesse if it works!
-		CDIntfReadBlock(block - 150, cdBuf2);
-		CDIntfReadBlock(block - 149, cdBuf3);
-		for(int i=0; i<2352-4; i+=4)
 		{
-			cdBuf[i+0] = cdBuf2[i+4];
-			cdBuf[i+1] = cdBuf2[i+5];
-			cdBuf[i+2] = cdBuf2[i+2];
-			cdBuf[i+3] = cdBuf2[i+3];
+			QueueDSFIFO(0x2000 | track[0].firstTrack);
+			QueueDSFIFO(0x2100 | track[0].lastTrack);
+			QueueDSFIFO(0x2200 | track[0].mins);
+			QueueDSFIFO(0x2300 | track[0].secs);
+			QueueDSFIFO(0x2400 | track[0].frms);
 		}
-		cdBuf[2348] = cdBuf3[0];
-		cdBuf[2349] = cdBuf3[1];
-		cdBuf[2350] = cdBuf2[2350];
-		cdBuf[2351] = cdBuf2[2351];//*/
 
-		block++, cdBufPtr = 0;
+		break;
 	}
-
-/*extern bool doDSPDis;
-if (block == 244968)
-	doDSPDis = true;//*/
-
-WriteLog("[%04X:%01X]", GET16(cdBuf, cdBufPtr), offset & 0x0F);
-if (cdBufPtr % 32 == 30)
-	WriteLog("\n");
-
-//	return GET16(cdBuf, cdBufPtr);
-//This probably isn't endian safe...
-// But then again... It seems that even though the data on the CD is organized as
-// LL LH RL RH the way it expects to see the data is RH RL LH LL.
-// D'oh! It doesn't matter *how* the data comes in, since it puts each sample into
-// its own left or right side queue, i.e. it reads them 32 bits at a time and puts
-// them into their L/R channel queues. It does seem, though, that it expects the
-// right channel to be the upper 16 bits and the left to be the lower 16.
-	return (cdBuf[cdBufPtr + 1] << 8) | cdBuf[cdBufPtr + 0];
-}
-
-bool ButchIsReadyToSend(void)
-{
-#ifdef LOG_CDROM_VERBOSE
-WriteLog("Butch is%s ready to send...\n", cdRam[I2CNTRL + 3] & 0x02 ? "" : " not");
-#endif
-	return (cdRam[I2CNTRL + 3] & 0x02 ? true : false);
-}
-
-//
-// This simulates a read from BUTCH over the SSI to JERRY. Uses real reading!
-//
-void SetSSIWordsXmittedFromButch(void)
-{
-
-// The problem comes in here. Really, we should generate the IRQ once we've stuffed
-// our values into the DAC L/RRXD ports...
-// But then again, the whole IRQ system needs an overhaul in order to make it more
-// cycle accurate WRT to the various CPUs. Right now, it's catch-as-catch-can, which
-// means that IRQs get serviced on scanline boundaries instead of when they occur.
-
-// NOTE: The CD BIOS uses the following SMODE:
-//       DAC: M68K writing to SMODE. Bits: WSEN FALLING  [68K PC=00050D8C]
-	cdBufPtr += 4;
-
-	if (cdBufPtr >= 2352)
+	case CMD_PAUSE:			// Pause CD
+		break;
+	case CMD_UNPAUSE:		// Unpause CD
+		break;
+	case CMD_GET_MSF:		// Get CD time in MSF format
+		break;
+	case CMD_GOTO_MIN:		// Goto time at <param> minutes
+		min = (uint32_t)param;
+		break;
+	case CMD_GOTO_SEC:		// Goto time at <param> seconds
+		sec = (uint32_t)param;
+		break;
+	case CMD_GOTO_FRM:		// Goto time at <param> frames
+		frm = (uint32_t)param;
+		// Convert MSF into block #
+		currentSector = ((((min * 60) + sec) * 75) + frm) - 150;
+		// Send back seek response OK
+		QueueDSFIFO(0x0100);
+		break;
+	case CMD_READ_LONG_TOC:	// Read long TOC, session #<param> (1st session is zero)
 	{
-WriteLog("CDROM: Reading block #%u...\n", block);
-		//No error checking. !!! FIX !!!
-//NOTE: We have to subtract out the 1st track start as well (in cdintf_foo.cpp)!
-//		CDIntfReadBlock(block - 150, cdBuf);
+		uint16_t status = CDIntfReadLongTOC(param);
 
-//Crappy kludge for shitty shit. Lesse if it works!
-//It does! That means my CD is WRONG! FUCK!
+		if (status != 0)
+			QueueDSFIFO(status);
+		else
+		{
+			for(int i=startTrack; i<=endTrack; i++)
+			{
+				QueueDSFIFO(0x6000 | track[i].firstTrack);
+				QueueDSFIFO(0x6100 | track[i].lastTrack);
+				QueueDSFIFO(0x6200 | track[i].mins);
+				QueueDSFIFO(0x6300 | track[i].secs);
+				QueueDSFIFO(0x6400 | track[i].frms);
+			}
 
-// But, then again, according to Belboz at AA the two zeroes in front *ARE* necessary...
-// So that means my CD is OK, just this method is wrong!
-// It all depends on whether or not the interrupt occurs on the RISING or FALLING edge
-// of the word strobe... !!! FIX !!!
+			QueueDSFIFO(0x6000);
+			QueueDSFIFO(0x6100);
+			QueueDSFIFO(0x6200);
+			QueueDSFIFO(0x6300);
+			QueueDSFIFO(0x6400);
+		}
 
-// When WS rises, left channel was done transmitting. When WS falls, right channel is done.
-//		CDIntfReadBlock(block - 150, cdBuf2);
-//		CDIntfReadBlock(block - 149, cdBuf3);
-		CDIntfReadBlock(block, cdBuf2);
-		CDIntfReadBlock(block + 1, cdBuf3);
-		memcpy(cdBuf, cdBuf2 + 2, 2350);
-		cdBuf[2350] = cdBuf3[0];
-		cdBuf[2351] = cdBuf3[1];//*/
-
-		block++, cdBufPtr = 0;
-
-/*extern bool doDSPDis;
-static int foo = 0;
-if (block == 244968)
-{
-	foo++;
-WriteLog("\n***** foo = %u, block = %u *****\n\n", foo, block);
-	if (foo == 2)
-		doDSPDis = true;
-}//*/
+		break;
 	}
-
-
-WriteLog("[%02X%02X %02X%02X]", cdBuf[cdBufPtr+1], cdBuf[cdBufPtr+0], cdBuf[cdBufPtr+3], cdBuf[cdBufPtr+2]);
-if (cdBufPtr % 32 == 28)
-	WriteLog("\n");
-
-//This probably isn't endian safe...
-// But then again... It seems that even though the data on the CD is organized as
-// LL LH RL RH the way it expects to see the data is RH RL LH LL.
-// D'oh! It doesn't matter *how* the data comes in, since it puts each sample into
-// its own left or right side queue, i.e. it reads them 32 bits at a time and puts
-// them into their L/R channel queues. It does seem, though, that it expects the
-// right channel to be the upper 16 bits and the left to be the lower 16.
-
-// This behavior is strictly a function of *where* the WS creates an IRQ. If the data
-// is shifted by two zeroes (00 00 in front of the data file) then this *is* the
-// correct behavior, since the left channel will be xmitted followed by the right
-
-// Now we have definitive proof: The MYST CD shows a word offset. So that means we have
-// to figure out how to make that work here *without* having to load 2 sectors, offset, etc.
-// !!! FIX !!!
-	lrxd = (cdBuf[cdBufPtr + 3] << 8) | cdBuf[cdBufPtr + 2],
-	rrxd = (cdBuf[cdBufPtr + 1] << 8) | cdBuf[cdBufPtr + 0];
+	case CMD_SET_PLAY_MODE:	// Set CD playback mode (speed, audio/data)
+		// Bit 0 - Speed (0 = single, 1 = double)
+		// Bit 1 - Mode (0 = audio, 1 = data)
+		// Bit 2 - ???
+		// Bit 3 - ??? (CD BIOS sets this in data mode for some reason... :-P)
+		QueueDSFIFO(0x1700 | param);
+		cdSpeed = param & 0x01;
+		break;
+	case CMD_GET_LAST_ERROR:	// Get last error
+		break;
+	case CMD_GET_LAST_ERR2:	// Get last error (2)
+		break;
+	case CMD_SET_SESSION:	// Spin up session #<param>
+		break;
+	case CMD_SET_START_MIN:	// Play start time at <param> minutes
+		break;
+	case CMD_SET_START_SEC:	// Play start time at <param> seconds
+		break;
+	case CMD_SET_START_FRM:	// Play start time at <param> frames
+		break;
+	case CMD_SET_STOP_MIN:	// Play stop time at <param> minutes
+		break;
+	case CMD_SET_STOP_SEC:	// Play stop time at <param> seconds
+		break;
+	case CMD_SET_STOP_FRM:	// Play stop time at <param> frames
+		break;
+	case CMD_GET_STATUS:	// Get disc and carousel status
+		break;
+	case CMD_SET_VOLUME:	// Set playback volume
+		break;
+	case CMD_SESSION_INFO:	// Get session info
+		break;
+	case CMD_CLEAR_TOC_READ:	// Clear TOC read flag
+		break;
+	case CMD_OVRSAMPLE_MODE:	// Set DAC mode <param>
+		// Need to set vars here...
+		QueueDSFIFO((cmd << 8) | param);
+		break;
+	default:
+		WriteLog("CDROM: Unhandled BUTCH command: %04X\n", (cmd << 8) | param);
+		break;
+	}
 }
+
 
 /*
 [18667]
@@ -1086,279 +1046,5 @@ P subchannel data: FF FF FF FF FF FF FF FF FF FF FF FF
 Q subchannel data: 21 02 00 00 00 01 00 04 08 66 9C 88
 
 Run address: $5000, Length: $18380
-*/
-
-
-/*
-CD_read function from the CD BIOS: Note that it seems to direct the EXT1 interrupt
-to the GPU--so that would mean *any* interrupt that BUTCH generates would be routed
-to the GPU...
-
-read:
-		btst.l	#31,d0
-		bne.w	.play
-		subq.l	#4,a0		; Make up for ISR pre-increment
-		move.l	d0,-(sp)
-		move.l	BUTCH,d0
-		and.l	#$ffff0000,d0
-		move.l	d0,BUTCH	; NO INTERRUPTS!!!!!!!!!!!
-		move.l	(sp)+,d0
-;		move.l	#0,BUTCH
-
-		move.w	#$101,J_INT
-
-		move.l	d1,-(sp)
-		move.l	I2CNTRL,d1	;Read I2S Control Register
-		bclr	#2,d1		; Stop data
-		move.l	d1,I2CNTRL
-		move.l	(sp)+,d1
-
-		move.l	PTRLOC,a2
-		move.l	a0,(a2)+
-		move.l	a1,(a2)+
-		move.l	#0,(a2)+
-
-		btst.b	#7,INITTYPE
-		beq	.not_bad
-		move.l	PTRLOC,a0
-		asl.l	#5,d2
-
-		move.l	d2,-(sp)
-
-		or.l	#$089a3c1a,d2		; These instructions include the bclr
-		move.l	d2,188(a0)
-
-		move.l	(sp)+,d2
-
-		swap	d2
-		or.l	#$3c1a1838,d2		; These instructions include the bclr
-		move.l	d2,196(a0)
-
-		move.l	#16,(a2)+
-		move.l	d1,(a2)
-
-.not_bad:
-
-		move.w	DS_DATA,d1			; Clear any pending DSARX states
-		move.l	I2CNTRL,d1			; Clear any pending errors
-
-; Drain the FIFO so that we don't get overloaded
-
-.dump:
-		move.l	FIFO_DATA,d1
-		move.l	I2CNTRL,d1
-		btst	#4,d1
-		bne.b	.dump
-
-.butch_go:
-		move.l	BUTCH,d1
-		and.l	#$FFFF0000,d1
-		or.l	#%000100001,d1			 ;Enable DSARX interrupt
-		move.l	d1,BUTCH
-;		move.l	#%000100001,BUTCH		 ;Enable DSARX interrupt
-
-; Do a play @
-
-.play:	move.l	d0,d1		; mess with copy in d1
-		lsr.l	#8,d1		; shift the byte over
-		lsr.w	#8,d1
-		or.w	#$1000,d1	; format it for goto
-		move.w	d1,DS_DATA	; DSA tx
-        bsr.b	DSA_tx
-
-		move.l	d0,d1		; mess with copy in d1
-		lsr.w	#8,d1
-		or.w	#$1100,d1	; format it for goto
-		move.w	d1,DS_DATA	; DSA tx
-        bsr.b	DSA_tx
-
-		move.l	d0,d1		; mess with copy in d1
-		and.w	#$00FF,d1	; mask for minutes
-		or.w	#$1200,d1	; format it for goto
-		move.w	d1,DS_DATA	; DSA tx
-        bsr.b	DSA_tx
-
-		rts
-
-
-****************************
-* Here's the GPU interrupt *
-****************************
-
-JERRY_ISR:
-	movei	#G_FLAGS,r30
-	load	(r30),r29		;read the flags
-
-	movei	#BUTCH,r24
-
-make_ptr:
-	move	pc,Ptrloc
-	movei	#(make_ptr-PTRPOS),TEMP
-	sub	TEMP,Ptrloc
-
-HERE:
-	move	pc,r25
-	movei	#(EXIT_ISR-HERE),r27
-	add	r27,r25
-
-; Is this a DSARX interrupt?
-
- 	load	(r24),r27		;check for DSARX int pending
-	btst	#13,r27
-	jr	z,fifo_read			; This should ALWAYS fall thru the first time
-
-; Set the match bit, to allow data
-;	moveq	#3,r26			; enable FIFO only
-; Don't just jam a value
-; Clear the DSARX and set FIFO
-	bclr	#5,r27
-	bset	#1,r27
-	store	r27,(r24)
-	addq	#$10,r24
-	load	(r24),r27
-	bset	#2,r27
-	store	r27,(r24)		; Disable SUBCODE match
-
-; Now we clear the DSARX interrupt in Butch
-
-	subq	#12,r24			; does what the above says
-	load	(r24),r26		;Clears DSA pending interrupt
-	addq	#6,r24
-	loadw	(r24),r27		; Read DSA response
-	btst	#10,r27			; Check for error
-	jr	nz,error
-	or	r26,r26
-	jump	(r25)
-;	nop
-
-fifo_read:
-; Check for ERROR!!!!!!!!!!!!!!!!!!!!!
-	btst	#14,r27
-	jr	z,noerror
-	bset	#31,r27
-error:
-	addq	#$10,r24
-	load	(r24),TEMP
-	or	TEMP,TEMP
-	subq	#$10,r24
-	load	(Ptrloc),TEMP
-	addq	#8,Ptrloc
-	store	TEMP,(Ptrloc)
-	subq	#8,Ptrloc
-noerror:
-	load	(Ptrloc),Dataptr	;get pointer
-
-; Check to see if we should stop
-	addq	#4,Ptrloc
-	load	(Ptrloc),TEMP
-	subq	#4,Ptrloc
-	cmp	Dataptr,TEMP
-	jr	pl,notend
-;	nop
-	bclr	#0,r27
-	store	r27,(r24)
-
-notend:
-	movei	#FIFO_DATA,CDdata
-	move	CDdata,r25
-	addq	#4,CDdata
-loptop:
-	load 	(CDdata),TEMP
-	load	(r25),r30
-	load	(CDdata),r21
-	load	(r25),r22
-	load	(CDdata),r24
-	load	(r25),r20
-	load	(CDdata),r19
-	load	(r25),r18
-	addq	#4,Dataptr
-	store	TEMP,(Dataptr)
-	addqt	#4,Dataptr
-	store	r30,(Dataptr)
-	addqt	#4,Dataptr
-	store	r21,(Dataptr)
-	addqt	#4,Dataptr
-	store	r22,(Dataptr)
-	addqt	#4,Dataptr
-	store	r24,(Dataptr)
-	addqt	#4,Dataptr
-	store	r20,(Dataptr)
-	addqt	#4,Dataptr
-	store	r19,(Dataptr)
-	addqt	#4,Dataptr
-	store	r18,(Dataptr)
-
-	store	Dataptr,(Ptrloc)
-
-exit_isr:
-	movei	#J_INT,r24	; Acknowledge in Jerry
-	moveq	#1,TEMP
-	bset	#8,TEMP
-	storew	TEMP,(r24)
-
-.if FLAG
-; Stack r18
-	load	(r31),r18
-	addq	#4,r31
-
-; Stack r19
-	load	(r31),r19
-	addq	#4,r31
-
-; Stack r20
-	load	(r31),r20
-	addq	#4,r31
-
-; Stack r21
-	load	(r31),r21
-	addq	#4,r31
-
-; Stack r22
-	load	(r31),r22
-	addq	#4,r31
-
-; Stack r23
-	load	(r31),r23
-	addq	#4,r31
-
-; Stack r26
-	load	(r31),r26
-	addq	#4,r31
-
-; Stack r27
-	load	(r31),r27
-	addq	#4,r31
-
-; Stack r24
-	load	(r31),r24
-	addq	#4,r31
-
-; Stack r25
-	load	(r31),r25
-	addq	#4,r31
-.endif
-
-	movei	#G_FLAGS,r30
-
-;r29 already has flags
-	bclr	#3,r29		;IMASK
-	bset	#10,r29		;Clear DSP int bit in TOM
-
-	load	(r31),r28	;Load return address
-
-
-	addq	#2,r28		;Fix it up
-	addq	#4,r31
-	jump	(r28)		;Return
-	store	r29,(r30)	;Restore broken flags
-
-
-	align long
-
-stackbot:
-	ds.l	20
-STACK:
-
-
 */
 

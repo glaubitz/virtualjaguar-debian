@@ -16,8 +16,6 @@
 
 #include <stdlib.h>								// For NULL definition
 #include "dac.h"
-//#include "jaguar.h"
-//#include "memory.h"
 #include "jagbios.h"
 #include "wavetable.h"
 
@@ -213,7 +211,7 @@ MemDesc memoryMap[] = {
 	{ 0xDFFF20, 0xDFFF23, MM_IO,   &sb_time }, // Subcode time and compare enable (D24)
 	{ 0xDFFF24, 0xDFFF27, MM_IO,   &fifo_data }, // i2s FIFO data
 	{ 0xDFFF28, 0xDFFF2B, MM_IO,   &i2sdat2 }, // i2s FIFO data (old)
-	{ 0xDFFF2C, 0xDFFF2F, MM_IO,   &unknown }, // Seems to be some sort of I2S interface
+	{ 0xDFFF2C, 0xDFFF2F, MM_IO,   &i2sbus }, // BUTCH's I2S interface to EEPROM
 
 	{ 0xE00000, 0xE1FFFF, MM_ROM,  jaguarBootROM },
 

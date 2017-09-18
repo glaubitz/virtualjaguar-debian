@@ -9,7 +9,7 @@
 // JLH = James Hammons <jlhamm@acm.org>
 //
 // Who  When        What
-// ---  ----------  -------------------------------------------------------------
+// ---  ----------  ------------------------------------------------------------
 // JLH  01/16/2010  Created this log ;-)
 // JLH  04/30/2012  Changed SDL audio handler to run JERRY
 //
@@ -42,6 +42,7 @@
 
 #include "dac.h"
 
+//#include <ctype.h>
 #include "SDL.h"
 #include "cdrom.h"
 #include "dsp.h"
@@ -50,7 +51,6 @@
 #include "jaguar.h"
 #include "log.h"
 #include "m68000/m68kinterface.h"
-//#include "memory.h"
 #include "settings.h"
 
 
@@ -140,7 +140,7 @@ void DACReset(void)
 //
 void DACPauseAudioThread(bool state/*= true*/)
 {
-		SDL_PauseAudio(state);
+	SDL_PauseAudio(state);
 }
 
 
@@ -159,14 +159,16 @@ void DACDone(void)
 }
 
 
-// Approach: Run the DSP for however many cycles needed to correspond to whatever sample rate
-// we've set the audio to run at. So, e.g., if we run it at 48 KHz, then we would run the DSP
-// for however much time it takes to fill the buffer. So with a 2K buffer, this would correspond
-// to running the DSP for 0.042666... seconds. At 26590906 Hz, this would correspond to
-// running the DSP for 1134545 cycles. You would then sample the L/RTXD registers every
-// 1134545 / 2048 = 554 cycles to fill the buffer. You would also have to manage interrupt
-// timing as well (generating them at the proper times), but that shouldn't be too difficult...
-// If the DSP isn't running, then fill the buffer with L/RTXD and exit.
+// Approach: Run the DSP for however many cycles needed to correspond to
+// whatever sample rate we've set the audio to run at. So, e.g., if we run it at
+// 48 KHz, then we would run the DSP for however much time it takes to fill the
+// buffer. So with a 2K buffer, this would correspond to running the DSP for
+// 0.042666... seconds. At 26590906 Hz, this would correspond to running the DSP
+// for 1134545 cycles. You would then sample the L/RTXD registers every 1134545
+// / 2048 = 554 cycles to fill the buffer. You would also have to manage
+// interrupt timing as well (generating them at the proper times), but that
+// shouldn't be too difficult... If the DSP isn't running, then fill the buffer
+// with L/RTXD and exit.
 
 //
 // SDL callback routine to fill audio buffer
@@ -193,19 +195,12 @@ void SDLSoundCallback(void * userdata, Uint8 * buffer, int length)
 		return;
 	}
 
-	// The length of time we're dealing with here is 1/48000 s, so we multiply this
-	// by the number of cycles per second to get the number of cycles for one sample.
-//	uint32_t riscClockRate = (vjs.hardwareTypeNTSC ? RISC_CLOCK_RATE_NTSC : RISC_CLOCK_RATE_PAL);
-//	uint32_t cyclesPerSample = riscClockRate / DAC_AUDIO_RATE;
-	// This is the length of time
-//	timePerSample = (1000000.0 / (double)riscClockRate) * ();
-
 	// Now, run the DSP for that length of time for each sample we need to make
 
 	bufferIndex = 0;
 	sampleBuffer = buffer;
-// If length is the length of the sample buffer in BYTES, then shouldn't the # of
-// samples be / 4? No, because we bump the sample count by 2, so this is OK.
+// If length is the length of the sample buffer in BYTES, then shouldn't the #
+// of samples be / 4? No, because we bump the sample count by 2, so this is OK.
 	numberOfSamples = length / 2;
 	bufferDone = false;
 
@@ -314,24 +309,40 @@ uint8_t DACReadByte(uint32_t offset, uint32_t who/*= UNKNOWN*/)
 }
 
 
-//static uint16_t fakeWord = 0;
+#define DEBUG_CDROM
+static uint32_t zeroSeen = 0;
 uint16_t DACReadWord(uint32_t offset, uint32_t who/*= UNKNOWN*/)
 {
 //	WriteLog("DAC: %s reading word from %08X\n", whoName[who], offset);
-//	return 0xFFFF;
-//	WriteLog("DAC: %s reading WORD %04X from %08X\n", whoName[who], fakeWord, offset);
-//	return fakeWord++;
-//NOTE: This only works if a bunch of things are set in BUTCH which we currently don't
-//      check for. !!! FIX !!!
-// Partially fixed: We check for I2SCNTRL in the JERRY I2S routine...
-//	return GetWordFromButchSSI(offset, who);
 	if (offset == LRXD || offset == RRXD)
 		return 0x0000;
 	else if (offset == LRXD + 2)
-		return lrxd;
-	else if (offset == RRXD + 2)
-		return rrxd;
+	{
+#ifdef DEBUG_CDROM
+		if (lrxd == 0)
+			zeroSeen++;
+		else
+			zeroSeen = 0;
 
-	return 0xFFFF;	// May need SSTAT as well... (but may be a Jaguar II only feature)
+		if (zeroSeen == 0)
+			WriteLog("DAC: %s reading WORD %04X from LRXD [%c%c]\n", whoName[who], lrxd, (isprint(lrxd >> 8) ? lrxd >> 8 : '.'), (isprint(lrxd & 0xFF) ? lrxd & 0xFF : '.'));
+#endif
+		return lrxd;
+	}
+	else if (offset == RRXD + 2)
+	{
+#ifdef DEBUG_CDROM
+		if (rrxd == 0)
+			zeroSeen++;
+		else
+			zeroSeen = 0;
+
+		if (zeroSeen == 0)
+			WriteLog("DAC: %s reading WORD %04X from RRXD [%c%c]\n", whoName[who], rrxd, (isprint(rrxd >> 8) ? rrxd >> 8 : '.'), (isprint(rrxd & 0xFF) ? rrxd & 0xFF : '.'));
+#endif
+		return rrxd;
+	}
+
+	return 0xFFFF;	// May need SSTAT as well...
 }
 
