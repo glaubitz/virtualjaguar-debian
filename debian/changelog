@@ -4,6 +4,7 @@ virtualjaguar (2.1.3-2) UNRELEASED; urgency=medium
   * debian/copyright: use spaces rather than tabs to start continuation
     lines.
   * Wrap long lines in changelog entries: 2.1.0-2.
+  * Use secure URI in Homepage field.
 
  -- Debian Janitor <janitor@jelmer.uk>  Tue, 05 May 2020 10:04:23 +0000
 
