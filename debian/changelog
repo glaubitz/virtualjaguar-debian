@@ -1,6 +1,8 @@
 virtualjaguar (2.1.3-2) UNRELEASED; urgency=medium
 
   * Use secure copyright file specification URI.
+  * debian/copyright: use spaces rather than tabs to start continuation
+    lines.
 
  -- Debian Janitor <janitor@jelmer.uk>  Tue, 05 May 2020 10:04:23 +0000
 
