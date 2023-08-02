@@ -21,7 +21,7 @@
 #define JOY_AXISDIR_MASK	0x000001
 
 #include <stdint.h>
-#include "SDL.h"
+#include <SDL2/SDL.h>
 
 // buttonID is the combination of the type (BUTTON, HAT) and the button #
 // (0-255 for buttons, 0-31 for hats). Hats also have 0-7 for a button #

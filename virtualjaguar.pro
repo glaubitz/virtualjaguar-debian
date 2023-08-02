@@ -33,8 +33,8 @@ else:macx { DEFINES += __GCCUNIX__ __THINK_STUPID__ }
 else:unix { DEFINES += __GCCUNIX__ }
 
 # SDL (to link statically on Mac)
-macx { LIBS += `sdl-config --static-libs` }
-else { LIBS += `$(CROSS)sdl-config --libs` }
+macx { LIBS += `sdl2-config --static-libs` }
+else { LIBS += `$(CROSS)sdl2-config --libs` }
 
 # libCDIO (may or may not be cross compatible, so we have this for now, just in
 # case we need it... (N.B.: the $(CDIO) is needed because under MXE, qmake
@@ -53,8 +53,8 @@ macx  { ICON = res/vj-icon.icns }
 # NOTE: May have to put -Wall back in, but only on non-release cycles. It can
 #       cause problems if you're not careful. (Can do this via command line in
 #       qmake)
-QMAKE_CFLAGS += `$(CROSS)sdl-config --cflags`
-QMAKE_CXXFLAGS += `$(CROSS)sdl-config --cflags`
+QMAKE_CFLAGS += `$(CROSS)sdl2-config --cflags`
+QMAKE_CXXFLAGS += `$(CROSS)sdl2-config --cflags`
 
 # Need to add libcdio stuffola (checking/including)...
 

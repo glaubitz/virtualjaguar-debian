@@ -23,7 +23,7 @@ HOSTCC  := gcc
 
 ARFLAGS := -rs
 GCC_DEPS = -MMD
-INCS    := -I. -I./obj `$(CROSS)sdl-config --cflags`
+INCS    := -I. -I./obj `$(CROSS)sdl2-config --cflags`
 
 OBJS = \
 	obj/cpustbl.o \

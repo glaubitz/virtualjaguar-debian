@@ -43,7 +43,7 @@
 #include "dac.h"
 
 //#include <ctype.h>
-#include "SDL.h"
+#include <SDL2/SDL.h>
 #include "cdrom.h"
 #include "dsp.h"
 #include "event.h"

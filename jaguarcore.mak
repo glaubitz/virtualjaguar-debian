@@ -42,8 +42,9 @@ LD      := $(CROSS)gcc
 AR      := $(CROSS)ar
 ARFLAGS := -rs
 
-SDL_CFLAGS = `$(CROSS)sdl-config --cflags`
+SDL_CFLAGS = `$(CROSS)sdl2-config --cflags`
 DEFINES = -D$(SYSTYPE) $(HAVECDIO)
+
 GCC_DEPS = -MMD
 
 INCS := -I./src

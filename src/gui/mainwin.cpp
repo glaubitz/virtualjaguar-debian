@@ -36,7 +36,7 @@
 
 #include "mainwin.h"
 
-#include "SDL.h"
+#include <SDL2/SDL.h>
 #include "app.h"
 #include "about.h"
 #include "configdialog.h"
