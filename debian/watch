@@ -1,3 +1,4 @@
 # Compulsory line, this is a version 3 file
 version=3
+opts=dversionmangle=s/\+final// \
 http://icculus.org/virtualjaguar/tarballs/virtualjaguar-([\d\.]*)\.tar\.bz2
