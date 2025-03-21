@@ -6,8 +6,8 @@ Uploaders: Teemu Hukkanen <tjhukkan@iki.fi>
 Build-Depends: debhelper-compat (= 13), qtbase5-dev, libqt5opengl5-desktop-dev, libsdl2-dev, netpbm, libcdio-dev
 Standards-Version: 4.7.2.0
 Homepage: http://icculus.org/virtualjaguar/
-Vcs-Git: git://github.com/glaubitz/virtualjaguar-debian.git
-Vcs-Browser: https://github.com/glaubitz/virtualjaguar-debian
+Vcs-Browser: https://salsa.debian.org/debian/virtualjaguar
+Vcs-Git: https://salsa.debian.org/debian/virtualjaguar.git
 
 Package: virtualjaguar
 Architecture: any
