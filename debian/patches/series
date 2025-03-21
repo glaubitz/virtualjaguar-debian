@@ -1,2 +1,3 @@
 0001-Switch-to-SDL2.patch
 0002-Use-joystick-identifier-from-SDL_JoystickOpen-for-SD.patch
+0003-Fix-missing-inclusion-of-m68kinterface.h-in-src-m680.patch

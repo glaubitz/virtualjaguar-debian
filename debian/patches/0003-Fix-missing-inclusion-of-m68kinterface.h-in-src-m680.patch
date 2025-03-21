@@ -1,0 +1,20 @@
+From: John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>
+Date: Sun, 14 Apr 2024 14:43:55 +0200
+Subject: Fix missing inclusion of m68kinterface.h in src/m68000/inlines.h
+
+---
+ src/m68000/inlines.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/m68000/inlines.h b/src/m68000/inlines.h
+index 54de932..c037bd9 100644
+--- a/src/m68000/inlines.h
++++ b/src/m68000/inlines.h
+@@ -11,6 +11,7 @@
+ #define __INLINES_H__
+ 
+ #include "cpudefs.h"
++#include "m68kinterface.h"
+ 
+ STATIC_INLINE int cctrue(const int cc)
+ {
