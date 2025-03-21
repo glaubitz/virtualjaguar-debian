@@ -1,1 +1,2 @@
 0001-Switch-to-SDL2.patch
+0002-Use-joystick-identifier-from-SDL_JoystickOpen-for-SD.patch
