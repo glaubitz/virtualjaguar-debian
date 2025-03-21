@@ -1,0 +1,149 @@
+From: Teemu Hukkanen <tjhukkan@iki.fi>
+Date: Thu, 3 Aug 2023 02:37:07 +0300
+Subject: Switch to SDL2
+
+---
+ jaguarcore.mak      | 3 ++-
+ src/dac.cpp         | 2 +-
+ src/dsp.cpp         | 2 +-
+ src/gui/app.cpp     | 2 +-
+ src/gui/gamepad.h   | 2 +-
+ src/gui/mainwin.cpp | 2 +-
+ src/jaguar.cpp      | 3 +--
+ src/m68000/Makefile | 2 +-
+ virtualjaguar.pro   | 8 ++++----
+ 9 files changed, 13 insertions(+), 13 deletions(-)
+
+diff --git a/jaguarcore.mak b/jaguarcore.mak
+index 65551a6..3c905bb 100644
+--- a/jaguarcore.mak
++++ b/jaguarcore.mak
+@@ -42,8 +42,9 @@ LD      := $(CROSS)gcc
+ AR      := $(CROSS)ar
+ ARFLAGS := -rs
+ 
+-SDL_CFLAGS = `$(CROSS)sdl-config --cflags`
++SDL_CFLAGS = `$(CROSS)sdl2-config --cflags`
+ DEFINES = -D$(SYSTYPE) $(HAVECDIO)
++
+ GCC_DEPS = -MMD
+ 
+ INCS := -I./src
+diff --git a/src/dac.cpp b/src/dac.cpp
+index 9714fa2..a09870b 100644
+--- a/src/dac.cpp
++++ b/src/dac.cpp
+@@ -43,7 +43,7 @@
+ #include "dac.h"
+ 
+ //#include <ctype.h>
+-#include "SDL.h"
++#include <SDL2/SDL.h>
+ #include "cdrom.h"
+ #include "dsp.h"
+ #include "event.h"
+diff --git a/src/dsp.cpp b/src/dsp.cpp
+index ec196e7..fdc561f 100644
+--- a/src/dsp.cpp
++++ b/src/dsp.cpp
+@@ -16,7 +16,7 @@
+ 
+ #include "dsp.h"
+ 
+-#include <SDL.h>								// Used only for SDL_GetTicks...
++#include <SDL2/SDL.h>								// Used only for SDL_GetTicks...
+ #include <stdlib.h>
+ #include "dac.h"
+ #include "gpu.h"
+diff --git a/src/gui/app.cpp b/src/gui/app.cpp
+index 9414dd4..347be00 100644
+--- a/src/gui/app.cpp
++++ b/src/gui/app.cpp
+@@ -17,7 +17,7 @@
+ 
+ #include "app.h"
+ 
+-#include <SDL.h>
++#include <SDL2/SDL.h>
+ #include <QApplication>
+ #include "gamepad.h"
+ #include "log.h"
+diff --git a/src/gui/gamepad.h b/src/gui/gamepad.h
+index 902dae1..2c62932 100644
+--- a/src/gui/gamepad.h
++++ b/src/gui/gamepad.h
+@@ -21,7 +21,7 @@
+ #define JOY_AXISDIR_MASK	0x000001
+ 
+ #include <stdint.h>
+-#include "SDL.h"
++#include <SDL2/SDL.h>
+ 
+ // buttonID is the combination of the type (BUTTON, HAT) and the button #
+ // (0-255 for buttons, 0-31 for hats). Hats also have 0-7 for a button #
+diff --git a/src/gui/mainwin.cpp b/src/gui/mainwin.cpp
+index 53a26f0..4569c4a 100644
+--- a/src/gui/mainwin.cpp
++++ b/src/gui/mainwin.cpp
+@@ -36,7 +36,7 @@
+ 
+ #include "mainwin.h"
+ 
+-#include "SDL.h"
++#include <SDL2/SDL.h>
+ #include "app.h"
+ #include "about.h"
+ #include "configdialog.h"
+diff --git a/src/jaguar.cpp b/src/jaguar.cpp
+index 34f5d4c..627d88a 100644
+--- a/src/jaguar.cpp
++++ b/src/jaguar.cpp
+@@ -17,8 +17,7 @@
+ #include "jaguar.h"
+ 
+ #include <time.h>
+-#include <SDL.h>
+-#include "SDL_opengl.h"
++#include <SDL2/SDL.h>
+ #include "blitter.h"
+ #include "cdrom.h"
+ #include "dac.h"
+diff --git a/src/m68000/Makefile b/src/m68000/Makefile
+index 16ed159..6796a85 100644
+--- a/src/m68000/Makefile
++++ b/src/m68000/Makefile
+@@ -23,7 +23,7 @@ HOSTCC  := gcc
+ 
+ ARFLAGS := -rs
+ GCC_DEPS = -MMD
+-INCS    := -I. -I./obj `$(CROSS)sdl-config --cflags`
++INCS    := -I. -I./obj `$(CROSS)sdl2-config --cflags`
+ 
+ OBJS = \
+ 	obj/cpustbl.o \
+diff --git a/virtualjaguar.pro b/virtualjaguar.pro
+index a53b444..6b6e651 100644
+--- a/virtualjaguar.pro
++++ b/virtualjaguar.pro
+@@ -33,8 +33,8 @@ else:macx { DEFINES += __GCCUNIX__ __THINK_STUPID__ }
+ else:unix { DEFINES += __GCCUNIX__ }
+ 
+ # SDL (to link statically on Mac)
+-macx { LIBS += `sdl-config --static-libs` }
+-else { LIBS += `$(CROSS)sdl-config --libs` }
++macx { LIBS += `sdl2-config --static-libs` }
++else { LIBS += `$(CROSS)sdl2-config --libs` }
+ 
+ # libCDIO (may or may not be cross compatible, so we have this for now, just in
+ # case we need it... (N.B.: the $(CDIO) is needed because under MXE, qmake
+@@ -53,8 +53,8 @@ macx  { ICON = res/vj-icon.icns }
+ # NOTE: May have to put -Wall back in, but only on non-release cycles. It can
+ #       cause problems if you're not careful. (Can do this via command line in
+ #       qmake)
+-QMAKE_CFLAGS += `$(CROSS)sdl-config --cflags`
+-QMAKE_CXXFLAGS += `$(CROSS)sdl-config --cflags`
++QMAKE_CFLAGS += `$(CROSS)sdl2-config --cflags`
++QMAKE_CXXFLAGS += `$(CROSS)sdl2-config --cflags`
+ 
+ # Need to add libcdio stuffola (checking/including)...
+ 
