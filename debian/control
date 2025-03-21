@@ -3,7 +3,12 @@ Section: otherosfs
 Priority: optional
 Maintainer: John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>
 Uploaders: Teemu Hukkanen <tjhukkan@iki.fi>
-Build-Depends: debhelper-compat (= 13), qtbase5-dev, libqt5opengl5-desktop-dev, libsdl2-dev, netpbm, libcdio-dev
+Build-Depends: debhelper-compat (= 13),
+               libcdio-dev,
+               libqt5opengl5-desktop-dev,
+               libsdl2-dev,
+               netpbm,
+               qtbase5-dev
 Standards-Version: 4.7.2.0
 Homepage: http://icculus.org/virtualjaguar/
 Vcs-Browser: https://salsa.debian.org/debian/virtualjaguar
@@ -11,7 +16,7 @@ Vcs-Git: https://salsa.debian.org/debian/virtualjaguar.git
 
 Package: virtualjaguar
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${misc:Depends}, ${shlibs:Depends}
 Description: Cross-platform Atari Jaguar emulator
  Virtual Jaguar is a cross-platform emulator for Atari's infamous
  Jaguar console, the last video game system to be ever released by
